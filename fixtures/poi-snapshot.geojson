@@ -1,0 +1,56 @@
+{
+  "type": "FeatureCollection",
+  "properties": {
+    "version": "demo-pois-v1",
+    "synthetic": true,
+    "source": "fictional-test-fixtures",
+    "source_date": "2026-10-03",
+    "coverage_complete": false,
+    "coverage_notes": "Fictional POIs only; no claim of real Bengaluru coverage",
+    "margin_m": 500
+  },
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "source_id": "demo-school-west",
+        "name": "Demo school outside west boundary",
+        "type": "school",
+        "synthetic": true
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.5997, 12.925]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "source_id": "demo-hospital",
+        "name": "Demo hospital",
+        "type": "hospital",
+        "synthetic": true
+      },
+      "geometry": {
+        "type": "Point",
+        "coordinates": [77.65, 12.945]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "source_id": "demo-road",
+        "name": "Demo major road",
+        "type": "major_road",
+        "synthetic": true
+      },
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [77.61, 12.92],
+          [77.68, 12.92]
+        ]
+      }
+    }
+  ]
+}

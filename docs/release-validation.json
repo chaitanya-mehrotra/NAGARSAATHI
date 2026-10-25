@@ -1,0 +1,50 @@
+{
+  "tested_at": "2026-10-03T11:57:21.519465+00:00",
+  "synthetic": true,
+  "fixture_version": "release-v1",
+  "fixture_as_of": "2026-10-01T12:00:00+00:00",
+  "hardware": {
+    "platform": "Windows-10-10.0.26200-SP0",
+    "processor": "AMD64 Family 25 Model 117 Stepping 2, AuthenticAMD",
+    "logical_cpus": 16,
+    "physical_memory_bytes": 16422010880
+  },
+  "concurrency": 20,
+  "distinct_load_identities": 20,
+  "reports": 1000,
+  "issues": 300,
+  "backup_restore": {
+    "passed": true,
+    "media_originals_checked": 1001,
+    "derivatives_checked": 1001,
+    "repair_history_checked": true,
+    "dump_sha256": "12f1bf64c9a4181f6a8af89882fba23210456879a8845de487970e2181f1d3d1"
+  },
+  "queue": {
+    "requests": 100,
+    "p95_ms": 238.68,
+    "target_ms": 500,
+    "passed": true
+  },
+  "metadata_submission": {
+    "requests": 40,
+    "p95_ms": 171.86,
+    "target_ms": 1000,
+    "passed": true,
+    "excludes_upload": true
+  },
+  "processing_to_human_review": {
+    "reports": 40,
+    "p95_ms": 1193.95,
+    "target_ms": 30000,
+    "passed": true,
+    "automatic_admission_measured": false
+  },
+  "age_refresh": {
+    "issues": 300,
+    "elapsed_ms": 7141.19,
+    "remaining_stale": 0,
+    "passed": true
+  },
+  "runtime_artifacts": ".local\\release-03fe16f3651e4ed68aff9d385ab21bfd"
+}

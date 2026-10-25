@@ -1,0 +1,23 @@
+from datetime import datetime
+from typing import Protocol
+
+from app.schemas import Principal, ValidationRequest, ValidationResult
+
+
+class IdentityProvider(Protocol):
+    async def authenticate(self, token: str) -> Principal: ...
+
+
+class PhotoValidator(Protocol):
+    async def validate(self, request: ValidationRequest) -> ValidationResult: ...
+
+
+class MediaStorage(Protocol):
+    async def put(self, key: str, content: bytes, content_type: str) -> None: ...
+    async def read(self, key: str) -> bytes: ...
+    async def delete(self, key: str) -> None: ...
+    async def signed_url(self, key: str, expires_at: datetime) -> str: ...
+
+
+class ReverseGeocoder(Protocol):
+    async def address(self, longitude: float, latitude: float) -> str | None: ...

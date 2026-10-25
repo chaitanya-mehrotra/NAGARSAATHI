@@ -1,0 +1,7 @@
+{
+  "name": "@nagarsaathi/contracts",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "types": "src/api.d.ts"
+}

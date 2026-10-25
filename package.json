@@ -1,0 +1,25 @@
+{
+  "name": "nagarsaathi",
+  "version": "0.1.0",
+  "private": true,
+  "workspaces": [
+    "apps/web",
+    "packages/contracts"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspace @nagarsaathi/web",
+    "build": "npm run build --workspace @nagarsaathi/web",
+    "typecheck": "npm run typecheck --workspace @nagarsaathi/web",
+    "test": "npm run test --workspace @nagarsaathi/web",
+    "test:e2e": "playwright test",
+    "format": "prettier --write apps/web packages/contracts config fixtures docs README.md compose.yaml package.json",
+    "format:check": "prettier --check apps/web packages/contracts config fixtures docs README.md compose.yaml package.json",
+    "contracts": "openapi-typescript packages/contracts/openapi.json -o packages/contracts/src/api.d.ts"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.63.0",
+    "openapi-typescript": "^7.6.1",
+    "prettier": "^3.5.3",
+    "vite": "^8.3.2"
+  }
+}

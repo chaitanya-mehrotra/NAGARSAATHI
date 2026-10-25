@@ -1,0 +1,15 @@
+version: demo-labels-v1
+providers:
+  demo-photos-v1:
+    pothole: pothole
+    D40: pothole
+    garbage: garbage_accumulation
+    trash_pile: garbage_accumulation
+    sewage: sewage_overflow
+    streetlight_failure: streetlight_failure
+  review-policy-v1:
+    pothole: pothole
+    garbage_accumulation: garbage_accumulation
+    sewage_overflow: sewage_overflow
+    streetlight_failure: streetlight_failure
+    other_civic_issue: other_civic_issue

@@ -1,0 +1,8 @@
+{
+  "fixture_version": "demo-scopes-v1",
+  "synthetic": true,
+  "scopes": {
+    "demo-reviewer": ["southwest"],
+    "demo-operator": ["southwest"]
+  }
+}

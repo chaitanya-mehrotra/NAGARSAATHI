@@ -1,0 +1,137 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "southwest",
+        "name": "Southwest"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.6, 12.9],
+            [77.63, 12.9],
+            [77.63, 12.93],
+            [77.6, 12.93],
+            [77.6, 12.9]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "south_central",
+        "name": "South Central"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.63, 12.9],
+            [77.66, 12.9],
+            [77.66, 12.93],
+            [77.63, 12.93],
+            [77.63, 12.9]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "southeast",
+        "name": "Southeast"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.66, 12.9],
+            [77.69, 12.9],
+            [77.69, 12.93],
+            [77.66, 12.93],
+            [77.66, 12.9]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "northwest",
+        "name": "Northwest"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.6, 12.93],
+            [77.63, 12.93],
+            [77.63, 12.96],
+            [77.6, 12.96],
+            [77.6, 12.93]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "north_central",
+        "name": "North Central"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.63, 12.93],
+            [77.66, 12.93],
+            [77.66, 12.96],
+            [77.63, 12.96],
+            [77.63, 12.93]
+          ]
+        ]
+      }
+    },
+    {
+      "type": "Feature",
+      "properties": {
+        "synthetic": true,
+        "source": "implementation-plan-demo-rectangles",
+        "boundary_version": "demo-envelope-v1",
+        "code": "northeast",
+        "name": "Northeast"
+      },
+      "geometry": {
+        "type": "Polygon",
+        "coordinates": [
+          [
+            [77.66, 12.93],
+            [77.69, 12.93],
+            [77.69, 12.96],
+            [77.66, 12.96],
+            [77.66, 12.93]
+          ]
+        ]
+      }
+    }
+  ]
+}
