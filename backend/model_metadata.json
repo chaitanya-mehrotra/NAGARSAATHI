@@ -1,0 +1,81 @@
+{
+  "model_version": "nagarsaathi-pothole-baseline-v1",
+  "model_sha256": "4a5fcba009a0320402a999d8ac81aab909d850225931dd75697630b7c78d1c90",
+  "architecture": "YOLO11n",
+  "pretrained_checkpoint": "yolo11n.pt",
+  "class_map": {
+    "0": "pothole"
+  },
+  "confidence_threshold": 0.35,
+  "input_settings": {
+    "imgsz": 640,
+    "rect": true,
+    "nms_iou": 0.7,
+    "candidate_confidence": 0.001,
+    "max_det": 300,
+    "half": false,
+    "augment": false,
+    "color": "RGB via PIL",
+    "coordinates": "pixel xyxy in EXIF-corrected canonical image"
+  },
+  "dependencies_recorded": {
+    "ultralytics": "8.4.171",
+    "torch": "2.11.0+cu130",
+    "pillow": "not recorded"
+  },
+  "training": {
+    "dataset_version": "nagarsaathi_grouped_v1",
+    "train_images": 460,
+    "validation_images": 99,
+    "test_images": 99,
+    "epochs": 30,
+    "seed": 42,
+    "batch": 8,
+    "hardware": "Tesla T4",
+    "arguments": "training/args.yaml"
+  },
+  "evaluation": {
+    "model_version": "nagarsaathi-pothole-baseline-v1",
+    "model_sha256": "4a5fcba009a0320402a999d8ac81aab909d850225931dd75697630b7c78d1c90",
+    "class": "pothole",
+    "test_images": 99,
+    "annotated_potholes": 311,
+    "confidence_threshold": 0.35,
+    "matching_iou": 0.5,
+    "nms_iou": 0.7,
+    "image_size": 640,
+    "precision_at_0_35": 0.7728937728937729,
+    "recall_at_0_35": 0.6784565916398714,
+    "f1_at_0_35": 0.7226027397260275,
+    "correct_boxes": 211,
+    "false_boxes": 62,
+    "missed_boxes": 100,
+    "mAP50": 0.7666826374666308,
+    "mAP50_95": 0.4605202167011863,
+    "hardware": "Tesla T4",
+    "mean_model_inference_ms": 4.172803818182913,
+    "timing_note": "Batch 1; excludes first prediction, preprocessing, postprocessing, file loading and uploads.",
+    "ultralytics_version": "8.4.171",
+    "torch_version": "2.11.0+cu130"
+  },
+  "threshold_selection": {
+    "split": "validation",
+    "criterion": "highest measured F1 among tested thresholds",
+    "thresholds": [
+      0.25,
+      0.35,
+      0.4,
+      0.5,
+      0.6,
+      0.7
+    ]
+  },
+  "limitations": [
+    "No negative photos in training/test splits.",
+    "Known sky false positive at confidence 0.45.",
+    "100 of 311 test annotations missed at confidence 0.35.",
+    "Grouping inferred visually, without verified capture metadata.",
+    "CPU/backend latency not yet measured.",
+    "No physical size, depth, severity, priority, or other civic classes."
+  ]
+}

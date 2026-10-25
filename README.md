@@ -1,160 +1,73 @@
-# NAGARSAATHI
+# NAGARSAATHI — Phase 2
 
-A local civic complaint pilot for southeast Bengaluru. The implementation follows
-`../CIVIC_COMPLAINT_PLATFORM_IMPLEMENTATION_PLAN.md`. Checkpoints 0–9 are available:
-the app shell, configuration, contracts, provider interfaces, dependency health,
-PostGIS schema, demo seed, geographic ownership checks, authentication, private
-uploads, durable report APIs and citizen submission/tracking screens;
-photo/category/location review, shared issues, duplicate comparisons and merge/split
-history, explained priority scoring, a filtered staff queue/map, area/category comparisons
-and scoped assignment controls are available. Operators can submit repair evidence for
-independent verification, with archive/history and reopening available to reviewers.
+React JavaScript, React Leaflet, Supabase and a FastAPI gateway. No invented records, metrics or predictions.
 
-The demo has no GPU, model, paid mapping provider or external account dependency.
-It is not an official municipal complaint service. All identity fixtures and service
-areas are synthetic. The proposed pilot boundary has not been reviewed.
+## Existing project
+The provided Codex workspace contained no source. A separate Desktop NAGARSAATHI checkout was later found through local tooling and inspected (README, manifest, source inventory and PinMap). It uses TypeScript, MapLibre, PostGIS, synthetic identities and a broader staff workflow. No YOLO inference was found in the inspected frontend/API source. It is preserved in place. This deliverable is a separate implementation of the requested JavaScript/Supabase architecture, not an in-place migration. Do not import that project's synthetic fixtures into this dashboard.
 
-## Local startup (Windows PowerShell)
+## Setup
+Requires Node 20.19+ / 22.12+ and Python 3.11+.
 
-Prerequisites: Python 3.11, uv, Node.js 20.19+ (or 22.12+), npm, Docker Desktop with
-the Linux engine running. Tested with Python 3.11.9 and Node 24.19.0.
+1. Create a Supabase project and run supabase/001_initial.sql once in its SQL editor.
+2. Enable anonymous sign-ins in Supabase Authentication.
+3. Copy .env.example to .env and set frontend project URL/public key and API URL.
+4. Set backend SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY. Never prefix server secrets with VITE_ or commit them. Set ALLOWED_ORIGINS to exact comma-separated browser origins.
+5. Install frontend dependencies with npm.cmd ci, then npm.cmd run dev.
+6. Create a Python virtual environment, install backend/requirements.txt, and run uvicorn backend.main:app from this directory. Backend loads the local .env.
+7. Host FastAPI separately for deployment; configure its HTTPS URL as VITE_API_BASE_URL and rebuild frontend.
 
-Run from this `nagarsaathi` folder:
+For YOLO set YOLO_MODEL_PATH to your teammate's single YOLO11n weights file, optional MODEL_VERSION, and YOLO_CLASS_MAPPING as JSON mapping exact trained labels to pothole/waterlogging. Missing weights honestly disable inference; submissions still work. The API independently reruns requested analysis before storing trusted findings. It never trusts browser predictions. Failed inference does not block a complaint.
 
-```powershell
-Copy-Item .env.example .env
-uv sync --locked --python 3.11
-npm.cmd ci
-docker compose up -d --wait
-.\.venv\Scripts\alembic.exe upgrade head
-.\.venv\Scripts\python.exe scripts/seed_demo.py
-```
+## Data and security
+The API validates the bearer JWT with Supabase Auth, derives ownership server-side and returns an explicit shared field list without owner IDs or submission keys. My Reports is tied to the anonymous browser session; clearing it can lose access. No cross-device recovery is promised.
 
-Start the API in one terminal:
+RLS is enabled. Browser complaint table grants are revoked, UPDATE policies are absent and the API has no status endpoint. The defensive insert policy enforces authenticated ownership, submitted status and no trusted AI fields. Server credentials stay in FastAPI.
 
-```powershell
-.\.venv\Scripts\python.exe -m uvicorn app.main:app --host 127.0.0.1 --port 8000
-```
+The private complaint-photos bucket has no browser policies. Server validates actual JPEG/PNG/WebP bytes, limits reads and processed output to 10 MB, rejects decompression bombs above 24 megapixels, applies orientation and copies fresh RGB pixels before JPEG encoding. This strips EXIF/GPS/XMP. Stable paths are stored; only individually authorized 10-minute URLs are returned. Refresh to renew expired links.
 
-Start the frontend in another terminal, from the same folder:
+Before submitting, users are told their photo, description and coordinates are shared with authenticated demo users. No fake timeline is shown.
 
-```powershell
-npm.cmd run dev
-```
+A stable submission UUID and database uniqueness make racing retries idempotent. On failed save, the API checks whether insertion committed before deleting its upload. If database commit state is uncertain, the file is retained for reconciliation. Maintainers should compare bucket objects against complaints.photo_path, review unreferenced objects older than 24 hours, then remove only confirmed orphans. Cleanup failures must be monitored operationally.
 
-Open <http://127.0.0.1:5173>. API docs: <http://127.0.0.1:8000/docs>.
-The frontend development proxy forwards `/api` to the API; no external network
-service is needed after installing dependencies and downloading the database image.
+Authorized maintainers update status in the secured Supabase SQL editor by full UUID:
+UPDATE public.complaints SET status = 'under_review' WHERE id = '<full UUID>';
+Allowed states: submitted, under_review, resolved. Trigger updates timestamps and signals clients. No admin interface is included.
 
-Health endpoints:
+## Realtime and map
+The migration publishes complaint_events, containing only UUID and timestamp, to Supabase Realtime. Authenticated users can read signals but cannot write them. The secured trigger emits on saved complaint insert/update without disclosing owner IDs.
 
-- `/api/v1/health/live` checks that the API responds.
-- `/api/v1/health/ready` checks a real PostGIS query and private local storage access.
-  It returns HTTP 503 when either dependency is unavailable.
-- `/api/v1/config/public` returns the configured pilot and categories without secrets.
+Frontend debounces invalidations, refetches records/aggregate counts/open details, cleans subscriptions, and refetches after SUBSCRIBED to recover missed events. Repeated signals cannot duplicate rows because data is fetched afresh. User filters, selection and viewport remain intact. Only SUBSCRIBED shows Live; failures show Reconnecting/Offline. There is no polling disguised as Live.
 
-Checkpoint 2 API endpoints require a bearer identity token. In demo mode, use
-`demo-citizen` or `demo-citizen-2`. Pre-provisioned `demo-reviewer` and `demo-operator`
-are scoped to Southwest; `demo-admin` has global read access. These are public
-synthetic identities, not secure accounts. Roles are loaded from the database.
-Use the **Authorize** button in API docs or the example in `docs/api.md`.
-The browser's **Report a problem** and **My reports** links provide the citizen flow.
-Choose a demo citizen, select photos, describe one problem, confirm its pin, review
-and submit. Staff accounts cannot submit as a citizen without a citizen grant.
+Map/list queries load 40 records per page and show the full matching total separately. Fit to results fits only that page. Both contributes to pothole and waterlogging counts. Bounded pages make clustering optional; it is not currently implemented. Date range uses inclusive submitted-from/through dates in UTC. Selected complaints use full UUID hash routes.
 
-Submit through the upload → complete → report API flow. Reports are durable but
-pending validation; no image/model approval is implied. Out-of-pilot reports remain
-visible to their owner; missing/unconfirmed locations await review.
+Tile URL and attribution are configurable. OSM standard tiles are the default, with visible linked attribution, normal browser caching and no prefetch/bulk/offline downloads. Preserve the browser referrer. Use a suitable commercial/provider plan for substantial traffic. Tile failure leaves list and numeric location entry usable. Geolocation runs only after a button click; it is never tracked continuously.
 
-Start the validation and admission worker in a third terminal:
+## Verification
+Passed locally: Vite production build, four Node validation tests (file boundaries/types, malformed versus empty AI responses, bounding boxes, mismatch classification), Python compilation, HTTP 200 from frontend server.
+Browser visual/interaction QA was blocked by a declined browser permission.
 
-```powershell
-.\.venv\Scripts\python.exe -m worker
-```
+Not verified: running SQL migration, live Auth/RLS/storage integration, persistence after refresh, realtime reconnection, actual YOLO inference and mobile browser behavior. Supabase credentials and trained weights were not supplied. The hosted disconnected state is intentional.
 
-`--once` processes one ready validation or admission job; `--check` checks dependencies.
-Default uncatalogued photos await human review. On `/reviews`, sign in using a
-pre-provisioned staff token (for the demo, `demo-reviewer` or `demo-admin`), inspect
-the evidence and record a category/location decision with a reason. Southwest staff
-cannot view another area's report; unassigned locations require the global admin.
-Located acceptance queues admission. With no plausible candidate, a shared issue is
-created; nearby candidates await a staff decision in `/reviews/duplicates`. The worker
-must be running for queued processing. On `/issues`, inspect linked evidence/history,
-merge into a surviving issue or split selected reports with a confirmed pin and reason.
-Different trusted inventory assets cannot be linked/merged. Scoped staff need permission
-over both areas for cross-area decisions. Report receipts show their linked issue reference.
-Priority scores and hazard review are available on `/priority`; issue detail shows factor
-contributions and accepts documented severity/urgency decisions. Global demo admins can
-preview and activate a versioned scoring epoch on `/priority/policies`. The worker processes
-score changes and 15-minute age refreshes. Scores show unknown context, pending urgency and
-staleness explicitly. The proposed weights and targets are demonstration policy settings;
-real pilot usefulness requires human review. `/staff` provides area/category/status/band,
-overdue and map-bounds filters, stable cursor pages and matching numbered map/list order.
-`/staff/areas` compares categories and counts within permitted areas. Open an issue for
-evidence, score explanations and assignment to an active area-scoped operator. Starting
-work is available at `/work` for the assigned operator. Reviewers verify, reject, archive
-and reopen from shared issue details. Archive retains reports, evidence and history.
+After configuration, use a disposable test Supabase project to verify:
+- Submit, refresh, confirm saved UUID, photo and coordinates; filters affect list and map.
+- Two isolated browser sessions have distinct My Reports, while shared responses contain no owner IDs.
+- Direct browser table writes/updates/deletes and bucket list/upload/read fail. Spoofed ownership and trusted predictions are rejected.
+- Double submit/retry one submission_key creates one row. Simulate upload and database failure, review orphans.
+- Deny location and manually pin or enter coordinates. Failed submit preserves form.
+- Missing/failing model and zero detections never block submission. Check original-image bbox scaling and Both partial support.
+- Two open clients show inserts/status changes in map/list/details/counts; reconnect recovers missed events and preserves viewport.
+- Photo URLs expire and bucket remains private.
+- At 360px and desktop, check overflow, keyboard controls, dialog focus, map/list switch and useful API/tile errors.
 
-Stop API/frontend with Ctrl+C. `docker compose stop` stops the database while
-preserving its volume. No reset or deletion command is provided at this checkpoint.
+Run npm.cmd test, npm.cmd run build, python -m py_compile backend/main.py.
+Add public-traffic abuse/rate limits and monitoring before unrestricted deployment.
 
-## Checks
+Official references:
+- https://supabase.com/docs/guides/auth/auth-anonymous
+- https://supabase.com/docs/guides/database/postgres/row-level-security
+- https://supabase.com/docs/guides/realtime/postgres-changes
+- https://leafletjs.com/reference.html
+- https://operations.osmfoundation.org/policies/tiles/
 
-The Python integration tests require the running local PostGIS database. They create
-uniquely named disposable test databases, exercise migrations and spatial constraints,
-then remove only those databases. They never reset the demo database.
 
-```powershell
-.\.venv\Scripts\python.exe -m pytest
-.\.venv\Scripts\ruff.exe check .
-.\.venv\Scripts\ruff.exe format --check .
-.\.venv\Scripts\mypy.exe
-npm.cmd run typecheck
-npm.cmd test
-npm.cmd run build
-npm.cmd run format:check
-npm.cmd run test:e2e
-docker compose config --quiet
-```
-
-After starting both servers, verify the real HTTP startup path:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/smoke_http.py
-```
-
-Python packages are locked in `uv.lock`; Node packages are locked in
-`package-lock.json`. To regenerate the typed API/provider contract after changing
-schemas, run:
-
-```powershell
-.\.venv\Scripts\python.exe scripts/export_contracts.py
-npm.cmd run contracts
-npm.cmd run format
-```
-
-Production startup rejects demo identity and fixture validation. Even a production
-configuration with reviewed settings remains blocked until real providers are wired
-in later checkpoints. Do not deploy this scaffold for real complaints.
-
-Checkpoint results and limitations are recorded in `docs/checkpoint-results.md`.
-Completed checkpoints are cumulative source ZIPs with SHA-256 manifests in
-`../Checkpoints`. Dependencies, local media, secrets and database volumes are excluded.
-After completing a checkpoint, archive it with
-`.\.venv\Scripts\python.exe scripts/archive_checkpoint.py <number>`.
-Continue only when the user commands the next checkpoint.
-Checkpoints 8 and 9 are complete. Checkpoint 10 model integration remains deferred.
-
-## Release checks and maintenance
-
-`.venv/Scripts/python.exe scripts/release_validation.py` creates disposable test databases,
-seeds fixed synthetic 1,000-report/300-issue fixtures, verifies database/photo restoration
-and measures a real local API at 20-user concurrency. It requires development dependencies,
-Docker CLI and free port 8002. It never seeds or restores the demo database. Results are in
-`docs/release-validation.json`; private runtime backups stay under `.local/release-*`.
-Load identities are restricted to the test harness. See `docs/release-validation.md` for
-hardware, scope and remaining pilot gates.
-
-`scripts/maintenance.py` previews expired unattached uploads, old orphan files and expired
-queue captures. `--apply` removes those disposable entries; report/repair evidence and
-archive history remain retained. Review the dry-run and keep backups before applying.
+Backend unit checks also passed: actual-image rejection, EXIF removal, 10 MB enforcement, authentication on shared data routes, and partial/empty inference semantics. Run python -m unittest backend.test_main -v after installing backend dependencies.
