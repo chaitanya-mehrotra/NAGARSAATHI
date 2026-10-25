@@ -8,6 +8,8 @@ databases or startup commands.
 The current frontend is Chaitanya's React/Leaflet interface. Its layout and CSS
 are preserved. Integration edits correct the photo API URL and show the actual
 pothole/waterlogging labels. Saish's separate UI is not edited.
+Hard-coded demo login attempts and quick-test credentials were removed; visitors
+register and sign in using their own accounts.
 
 ## What runs together
 
@@ -98,3 +100,9 @@ npm.cmd run build
 
 The historical Supabase SQL file and older pothole-only weights remain in Git for
 reference. They are not used by the configured combined-model Docker service.
+
+Verified locally: all five backend tests, four frontend tests, frontend build,
+and a real single-origin Docker HTTP check on 1 CPU/2 GB. That check registered a
+disposable citizen, rejected a supplied admin role, saved pothole and waterlogging
+complaints with real model inference, retrieved private photos and rejected malformed
+images. Test records were kept in a disposable container, not the app's database.

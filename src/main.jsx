@@ -129,14 +129,12 @@ function App() {
     setTimeout(() => setToast(""), 4000);
   }
 
-  async function handleLogin(e, demoEmail, demoPass) {
+  async function handleLogin(e) {
     if (e) e.preventDefault();
     setAuthError("");
     setAuthLoading(true);
     try {
-      const email = demoEmail || authForm.email;
-      const pass = demoPass || authForm.password;
-      const res = await login(email, pass);
+      const res = await login(authForm.email, authForm.password);
       setUser(res.user);
       setAuthModal(false);
       notify(`Signed in as ${res.user.name}`);
@@ -216,13 +214,7 @@ function App() {
       if (sess?.user) {
         setUser(sess.user);
       } else {
-        // Auto-login demo citizen if first time visiting so user immediately sees live data
-        login("citizen1@example.com", "securepassword123")
-          .then((res) => {
-            setUser(res.user);
-            reload();
-          })
-          .catch(() => {});
+        setUser(null);
       }
     });
     setConnection("Live");
@@ -1012,7 +1004,7 @@ function App() {
                           <Info size={18} />
                           <span>
                             Your description, photo and issue location will be
-                            shared with other demo users. Please do not include
+                            visible to you and authorized administrators. Avoid
                             personal information.
                           </span>
                         </div>
@@ -1078,9 +1070,8 @@ function App() {
                     </div>
                     <hr />
                     <small>
-                      My Reports is tied to this browser session. Clearing the
-                      session can remove your access. Cross-device recovery is
-                      not available.
+                      Your reports are saved to your account. Sign in with the
+                      same account to access them on another device.
                     </small>
                   </aside>
                 </div>
@@ -1174,7 +1165,7 @@ function App() {
                           {metrics ? metrics[k] : busy ? "…" : "—"}
                         </strong>
                         <small>
-                          {metrics ? sub : "Awaiting database connection"}
+                          {metrics ? sub : user ? "Loading reports" : "Sign in to view reports"}
                         </small>
                       </button>
                     );
@@ -1202,7 +1193,7 @@ function App() {
                       </h2>
                       <span className="outline-badge">
                         {total === null
-                          ? "Not connected"
+                          ? user ? "Loading" : "Sign in required"
                           : total + " complaints"}
                       </span>
                     </div>
@@ -1436,7 +1427,7 @@ function App() {
                       </button>
                       <span>
                         {total === null
-                          ? "Reports appear after setup"
+                          ? user ? "Loading reports" : "Sign in to view your reports"
                           : total === 0
                             ? "0 reports"
                             : offset +
@@ -2005,29 +1996,6 @@ function App() {
               </button>
             </form>
 
-            <div style={{ marginTop: "24px", paddingTop: "16px", borderTop: "1px solid #f1f5f9" }}>
-              <div style={{ fontSize: "11px", color: "#64748b", marginBottom: "8px", fontWeight: 600 }}>
-                QUICK TEST ACCOUNTS:
-              </div>
-              <div style={{ display: "flex", gap: "8px" }}>
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{ flex: 1, fontSize: "12px", padding: "8px" }}
-                  onClick={() => handleLogin(null, "citizen1@example.com", "securepassword123")}
-                >
-                  👤 Demo Citizen
-                </button>
-                <button
-                  type="button"
-                  className="secondary"
-                  style={{ flex: 1, fontSize: "12px", padding: "8px", color: "#b45309" }}
-                  onClick={() => handleLogin(null, "admin@nagarsaathi.org", "adminpassword123")}
-                >
-                  🛡️ Demo Admin
-                </button>
-              </div>
-            </div>
           </section>
         </div>
       )}
