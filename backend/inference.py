@@ -25,8 +25,10 @@ def load_model():
             if hashlib.sha256(weights.read_bytes()).hexdigest() != METADATA["model_sha256"]:
                 raise RuntimeError("best.pt does not match model_metadata.json")
             candidate = YOLO(str(weights))
-            if dict(candidate.names) != {0: "pothole"}:
-                raise RuntimeError("Expected only class 0: pothole")
+            expected_classes = {int(k): v for k, v in METADATA.get("class_map", {"0": "pothole"}).items()}
+            for cid, expected_name in expected_classes.items():
+                if candidate.names.get(cid) != expected_name:
+                    raise RuntimeError(f"Model class {cid} is {candidate.names.get(cid)}, expected {expected_name}")
             _MODEL = candidate
         return _MODEL
 
@@ -78,11 +80,12 @@ def detect_potholes(image_path) -> dict:
             coordinates = result.boxes.xyxy.cpu().tolist()
             confidences = result.boxes.conf.cpu().tolist()
             classes = result.boxes.cls.cpu().tolist()
+            class_map = {int(k): v for k, v in METADATA.get("class_map", {"0": "pothole", "1": "waterlogging"}).items()}
             for box, score, class_id in zip(coordinates, confidences, classes):
                 if score < threshold:
                     continue
-                if int(class_id) != 0:
-                    raise RuntimeError("Unexpected model class")
+                cid = int(class_id)
+                label = model.names.get(cid, class_map.get(cid, f"class_{cid}"))
                 x1, y1, x2, y2 = box
                 box = [max(0.0, min(float(x1), width)),
                        max(0.0, min(float(y1), height)),
@@ -90,7 +93,7 @@ def detect_potholes(image_path) -> dict:
                        max(0.0, min(float(y2), height))]
                 if box[2] <= box[0] or box[3] <= box[1]:
                     continue
-                detections.append({"class_id": 0, "label": "pothole",
+                detections.append({"class_id": cid, "label": label,
                                    "confidence": float(score), "bbox_xyxy": box})
     detections.sort(key=lambda entry: entry["confidence"], reverse=True)
     return {"image_width": width, "image_height": height,

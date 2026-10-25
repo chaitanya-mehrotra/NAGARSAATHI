@@ -5,7 +5,7 @@ export default defineConfig({
     host: '127.0.0.1',
     port: 5174,
     watch: {
-      ignored: ['**/backend/**', '**/*.pt', '**/data/**', '**/.venv/**']
+      ignored: ['**/backend/**', '**/*.pt', '**/*.zip', '**/data/**', '**/.venv/**']
     }
   }
 });
