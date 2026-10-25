@@ -1,0 +1,14 @@
+.git
+.env
+.env.*
+!.env.example
+.venv
+.local
+node_modules
+dist
+backend/data
+backend/best.pt
+**/__pycache__
+**/*.pyc
+**/*test*.py
+supabase

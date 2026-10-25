@@ -6,6 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
+from dotenv import load_dotenv
 from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
@@ -13,7 +14,11 @@ from fastapi.responses import JSONResponse
 from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
+# Ultralytics patches Image.open after startup. Keep Pillow's original decoder
+# for upload validation so malformed images cannot trigger optional HEIF imports.
+_PIL_OPEN = Image.open
 logger = logging.getLogger("uvicorn.error")
+load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
 try:
     from backend.accounts import current_user, router as accounts_router
@@ -39,9 +44,9 @@ async def lifespan(app: FastAPI):
 
         await run_in_threadpool(load_model)
         app.state.model_ready = True
-        logger.info("YOLO11n pothole model loaded successfully")
+        logger.info("YOLO11n pothole/waterlogging model loaded successfully")
     except Exception as e:
-        logger.warning(f"Pothole model could not be loaded: {e}. Submissions will remain available.")
+        logger.warning(f"Model could not be loaded: {e}. Submissions will remain available.")
 
     yield
 
@@ -112,6 +117,15 @@ def metrics():
     }
 
 
+@app.get("/ready")
+def ready():
+    if not getattr(app.state, "model_ready", False):
+        return error_response(503, "MODEL_UNAVAILABLE", "The model has not finished loading")
+    with connect() as db:
+        db.execute("SELECT 1").fetchone()
+    return {"status": "ready", "model_ready": True}
+
+
 @app.get("/complaints")
 def list_complaints_alias(
     search: str = "",
@@ -171,7 +185,7 @@ def get_complaint_alias(complaint_id: int, user: dict = Depends(current_user)):
 
 
 @app.post("/dev/detect", tags=["Local model testing"])
-def test_photo(image: UploadFile = File(...)):
+def test_photo(image: UploadFile = File(...), user: dict = Depends(current_user)):
     if not getattr(app.state, "model_ready", False):
         return error_response(
             503,
@@ -189,7 +203,7 @@ def test_photo(image: UploadFile = File(...)):
         )
 
     try:
-        with Image.open(io.BytesIO(image_bytes)) as original:
+        with _PIL_OPEN(io.BytesIO(image_bytes), formats=["JPEG", "PNG", "WEBP"]) as original:
             if original.format not in {"JPEG", "PNG", "WEBP"}:
                 raise ValueError("Unsupported format")
             if getattr(original, "n_frames", 1) != 1:
@@ -223,5 +237,5 @@ def test_photo(image: UploadFile = File(...)):
         return error_response(
             503,
             "ANALYSIS_UNAVAILABLE",
-            f"The photo could not be analysed: {e}",
+            "The photo could not be analysed. Please retry or submit for human review.",
         )

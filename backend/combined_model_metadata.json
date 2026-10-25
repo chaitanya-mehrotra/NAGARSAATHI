@@ -1,0 +1,22 @@
+{
+  "model_version": "nagarsaathi-yolo11n-v3",
+  "model_sha256": "748e47702e7fa7068ab64a9005cbefb02873e0190eff67496dbd2ef2a8f6a676",
+  "architecture": "YOLO11n",
+  "class_map": {"0": "pothole", "1": "waterlogging"},
+  "confidence_threshold": 0.25,
+  "input_settings": {
+    "imgsz": 640,
+    "rect": true,
+    "nms_iou": 0.7,
+    "candidate_confidence": 0.001,
+    "max_det": 300,
+    "half": false,
+    "augment": false
+  },
+  "limitations": [
+    "Confidence is not overall accuracy or physical severity.",
+    "This threshold is a starting operating point, not a separately optimized threshold.",
+    "Mixed validation tradeoffs; model predictions assist human review.",
+    "Do not reject complaint submission because detections are absent."
+  ]
+}

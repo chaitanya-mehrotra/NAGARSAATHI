@@ -13,6 +13,7 @@ from fastapi.security import HTTPAuthorizationCredentials
 from PIL import Image, ImageOps, UnidentifiedImageError
 from pydantic import BaseModel, Field
 
+_PIL_OPEN = Image.open  # Capture before the model's optional-format monkeypatch.
 try:
     from backend.accounts import admin_user, current_user, bearer
     from backend.database import DATA_DIR, connect
@@ -74,7 +75,7 @@ def submit_report(
 
     # Validate actual image content
     try:
-        with Image.open(io.BytesIO(content)) as original:
+        with _PIL_OPEN(io.BytesIO(content), formats=["JPEG", "PNG", "WEBP"]) as original:
             if original.format not in ("JPEG", "PNG", "WEBP"):
                 raise ValueError("Unsupported format")
             if getattr(original, "n_frames", 1) != 1:

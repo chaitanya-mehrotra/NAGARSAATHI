@@ -7,5 +7,6 @@ __pycache__/
 .venv/
 .sites-runtime/
 backend/data/
+.local/
 git_sync.py
 .openai/

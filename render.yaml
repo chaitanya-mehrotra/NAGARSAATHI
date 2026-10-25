@@ -1,0 +1,23 @@
+# Paid service and persistent disk: review Render's price before creating resources.
+services:
+  - type: web
+    name: nagarsaathi-chaitanya-ui
+    runtime: docker
+    plan: 1c-2g
+    region: singapore
+    dockerfilePath: ./Dockerfile
+    healthCheckPath: /api/ready
+    numInstances: 1
+    envVars:
+      - key: NAGARSAATHI_DATA_DIR
+        value: /var/data
+      - key: NAGARSAATHI_DEVICE
+        value: cpu
+      - key: YOLO_MODEL_PATH
+        value: backend/models/nagarsaathi-combined-v3.pt
+      - key: MODEL_METADATA_PATH
+        value: backend/combined_model_metadata.json
+    disk:
+      name: complaint-data
+      mountPath: /var/data
+      sizeGB: 1

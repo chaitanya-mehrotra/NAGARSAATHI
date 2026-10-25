@@ -42,6 +42,7 @@ import {
   getStoredToken,
   getStoredUser,
   updateReport,
+  reportPhotoUrl,
 } from "./services";
 import {
   issueLabels,
@@ -600,16 +601,16 @@ function App() {
                     <div className="ai-panel" style={{ textAlign: "left", margin: "16px auto", maxWidth: "480px" }}>
                       <strong>YOLO11n Detection Results</strong>
                       <p>
-                        {success.analysis?.detections?.length || 0} potholes detected · {success.analysis?.model_version || "YOLO11n"}
+                        {success.analysis?.detections?.length || 0} detections · {success.analysis?.model_version || "YOLO11n"}
                       </p>
                       {success.analysis?.detections?.length === 0 && (
                         <p className="muted" style={{ margin: "6px 0" }}>
-                          Zero potholes detected in photo. Complaint is safely preserved in records.
+                          No pothole or waterlogging detected above the threshold. Complaint is preserved in records.
                         </p>
                       )}
                       {success.analysis?.detections?.map((d, i) => (
                         <p key={i} style={{ margin: "4px 0" }}>
-                          Pothole · {Math.round(d.confidence * 100)}% model confidence
+                          {issueLabels[d.label || d.class_name] || "Road issue"} · {Math.round(d.confidence * 100)}% model confidence
                         </p>
                       ))}
                       <small>Model confidence assists review and is never confused with pothole severity.</small>
@@ -1618,11 +1619,7 @@ function App() {
                 {detail.photo_url && (
                   <img
                     className="detail-photo"
-                    src={
-                      detail.photo_url.startsWith("http")
-                        ? detail.photo_url
-                        : `http://127.0.0.1:8001${detail.photo_url}?token=${getStoredToken()}`
-                    }
+                    src={reportPhotoUrl(detail.photo_url)}
                     alt="Complaint photo"
                   />
                 )}
@@ -1657,14 +1654,14 @@ function App() {
                   <div className="ai-panel">
                     <strong>YOLO11n Detection Findings</strong>
                     <p>
-                      {detail.analysis?.detections?.length || 0} potholes detected · {detail.analysis?.model_version || "YOLO11n"}
+                      {detail.analysis?.detections?.length || 0} detections · {detail.analysis?.model_version || "YOLO11n"}
                     </p>
                     {detail.analysis?.detections?.length === 0 && (
-                      <p className="muted">Zero potholes detected in photo.</p>
+                      <p className="muted">No pothole or waterlogging detected above the threshold.</p>
                     )}
                     {detail.analysis?.detections?.map((d, i) => (
                       <p key={i}>
-                        Pothole · {Math.round(d.confidence * 100)}% model confidence
+                        {issueLabels[d.label || d.class_name] || "Road issue"} · {Math.round(d.confidence * 100)}% model confidence
                       </p>
                     ))}
                     <small>

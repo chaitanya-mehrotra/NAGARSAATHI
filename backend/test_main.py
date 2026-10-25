@@ -148,6 +148,16 @@ class BackendComprehensiveTests(unittest.TestCase):
                     # 6. Invalid image content rejection
                     bad_img_resp = submit(headers=headers1, content=b"not an image file")
                     self.assertEqual(bad_img_resp.status_code, 400)
+                    # Model libraries may patch PIL.Image.open to import optional HEIF
+                    # packages on failure. Upload validation must use the original decoder.
+                    with patch.object(Image, "open", side_effect=ModuleNotFoundError("pi_heif")):
+                        invalid_report = submit(headers=headers1, content=b"invalid bytes")
+                        self.assertEqual(invalid_report.status_code, 400)
+                        invalid_analysis = client.post(
+                            "/dev/detect", headers=headers1,
+                            files={"image": ("invalid.jpg", b"invalid bytes", "image/jpeg")},
+                        )
+                        self.assertEqual(invalid_analysis.status_code, 400)
 
                     # 7. Role-based Access Control (Citizens see only their own)
                     # Citizen 2 cannot access Citizen 1's report

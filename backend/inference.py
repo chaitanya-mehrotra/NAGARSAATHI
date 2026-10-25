@@ -1,4 +1,4 @@
-"""Single-class detector. Box coordinates refer to the EXIF-corrected RGB image."""
+"""Combined detector. Box coordinates refer to the EXIF-corrected RGB image."""
 import argparse
 import hashlib
 import json
@@ -9,7 +9,14 @@ from threading import RLock
 from PIL import Image, ImageOps
 
 ROOT = Path(__file__).resolve().parent
-METADATA = json.loads((ROOT / "model_metadata.json").read_text())
+PROJECT_ROOT = ROOT.parent
+def configured_path(value):
+    path = Path(value)
+    return path if path.is_absolute() else PROJECT_ROOT / path
+
+METADATA = json.loads(configured_path(os.environ.get(
+    "MODEL_METADATA_PATH", "backend/combined_model_metadata.json"
+)).read_text())
 _LOCK = RLock()
 _MODEL = None
 _DEVICE = os.environ.get("NAGARSAATHI_DEVICE", "cpu")
@@ -21,12 +28,19 @@ def load_model():
     with _LOCK:
         if _MODEL is None:
             from ultralytics import YOLO
-            weights = ROOT / "best.pt"
+            weights = configured_path(os.environ.get(
+                "YOLO_MODEL_PATH", "backend/models/nagarsaathi-combined-v3.pt"
+            ) or "backend/models/nagarsaathi-combined-v3.pt")
             if hashlib.sha256(weights.read_bytes()).hexdigest() != METADATA["model_sha256"]:
-                raise RuntimeError("best.pt does not match model_metadata.json")
+                raise RuntimeError("Checkpoint does not match the selected model metadata")
+            config_dir = Path(os.environ.get("NAGARSAATHI_DATA_DIR", ROOT / "data")) / "ultralytics"
+            config_dir.mkdir(parents=True, exist_ok=True)
+            os.environ.setdefault("YOLO_CONFIG_DIR", str(config_dir))
+            os.environ.setdefault("YOLO_AUTOINSTALL", "false")
             candidate = YOLO(str(weights))
-            if dict(candidate.names) != {0: "pothole"}:
-                raise RuntimeError("Expected only class 0: pothole")
+            expected = {int(key): value for key, value in METADATA["class_map"].items()}
+            if dict(candidate.names) != expected:
+                raise RuntimeError("Model classes do not match the selected metadata")
             _MODEL = candidate
         return _MODEL
 
@@ -81,7 +95,8 @@ def detect_potholes(image_path) -> dict:
             for box, score, class_id in zip(coordinates, confidences, classes):
                 if score < threshold:
                     continue
-                if int(class_id) != 0:
+                label = METADATA["class_map"].get(str(int(class_id)))
+                if label not in {"pothole", "waterlogging"}:
                     raise RuntimeError("Unexpected model class")
                 x1, y1, x2, y2 = box
                 box = [max(0.0, min(float(x1), width)),
@@ -90,7 +105,7 @@ def detect_potholes(image_path) -> dict:
                        max(0.0, min(float(y2), height))]
                 if box[2] <= box[0] or box[3] <= box[1]:
                     continue
-                detections.append({"class_id": 0, "label": "pothole",
+                detections.append({"class_id": int(class_id), "label": label,
                                    "confidence": float(score), "bbox_xyxy": box})
     detections.sort(key=lambda entry: entry["confidence"], reverse=True)
     return {"image_width": width, "image_height": height,
@@ -99,7 +114,7 @@ def detect_potholes(image_path) -> dict:
 
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Run the NAGARSAATHI pothole model")
+    parser = argparse.ArgumentParser(description="Run the NAGARSAATHI pothole/waterlogging model")
     parser.add_argument("image", help="Path to a JPEG or PNG")
     parser.add_argument("--output", default="prediction.json")
     parser.add_argument("--annotated", default="prediction.jpg")
@@ -113,7 +128,7 @@ if __name__ == "__main__":
         box = detection["bbox_xyxy"]
         draw.rectangle(box, outline="red", width=3)
         draw.text((box[0], max(0, box[1] - 14)),
-                  f"pothole {detection['confidence']:.2f}", fill="red")
+                  f"{detection['label']} {detection['confidence']:.2f}", fill="red")
     photo.save(args.annotated)
     print(json.dumps(prediction, indent=2))
     print(f"Saved {args.output} and {args.annotated}")

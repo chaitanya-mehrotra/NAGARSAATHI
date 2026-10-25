@@ -8,6 +8,14 @@ const base = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8001").repl
 const TOKEN_KEY = "nagarsaathi_token";
 const USER_KEY = "nagarsaathi_user";
 
+export function reportPhotoUrl(path) {
+  const apiOrigin = new URL(base, window.location.origin).origin;
+  const url = new URL(path.startsWith("http") ? path : `${base}${path}`, window.location.origin);
+  if (url.origin !== apiOrigin) throw new Error("Unexpected photo service origin");
+  url.searchParams.set("token", getStoredToken());
+  return url.toString();
+}
+
 export function getStoredToken() {
   return localStorage.getItem(TOKEN_KEY) || "";
 }
