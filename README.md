@@ -26,7 +26,7 @@ The public image serves the frontend at `/` and the API at `/api`, so no visitor
 
 ## Model behavior
 
-The configured checkpoint is `backend/models/nagarsaathi-combined-v3.pt` with classes `0=pothole` and `1=waterlogging`. Its hash and settings are in `backend/combined_model_metadata.json`. The original pothole-only `backend/best.pt` and metadata remain in Git for reference and are excluded from the deployment image.
+The configured checkpoint is `backend/models/nagarsaathi-combined-v3.pt` with classes `0=pothole` and `1=waterlogging`. Its hash and settings are in `backend/combined_model_metadata.json`. Chaitanya's compatible `backend/best.pt` copy and `backend/model_metadata.json` are also preserved in Git, while the Docker image uses the explicitly configured combined checkpoint.
 
 AI findings assist review. Missing detections or model failures never reject a saved complaint. Confidence is not overall accuracy, severity, depth, or physical size. Public registration creates citizens; admins are provisioned separately using `python -m backend.accounts` in a secure shell.
 

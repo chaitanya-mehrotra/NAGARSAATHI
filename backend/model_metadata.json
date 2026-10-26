@@ -1,10 +1,11 @@
 {
-  "model_version": "nagarsaathi-pothole-baseline-v1",
-  "model_sha256": "4a5fcba009a0320402a999d8ac81aab909d850225931dd75697630b7c78d1c90",
+  "model_version": "nagarsaathi-yolo11n-v3",
+  "model_sha256": "748e47702e7fa7068ab64a9005cbefb02873e0190eff67496dbd2ef2a8f6a676",
   "architecture": "YOLO11n",
   "pretrained_checkpoint": "yolo11n.pt",
   "class_map": {
-    "0": "pothole"
+    "0": "pothole",
+    "1": "waterlogging"
   },
   "confidence_threshold": 0.35,
   "input_settings": {

@@ -12,7 +12,7 @@ One hundred submissions do not necessarily mean twenty issues. Twenty is the des
 
 ## Before either person starts
 
-1. Publish a common baseline containing the latest local grouping changes and these documents. They are currently local changes; the previously pushed branch alone is not this entire baseline.
+1. Use the common baseline on `chaitanya's-UI` containing the grouping changes and these documents. Both people must start from the same published commit before creating their feature branches.
 2. Both people clone/pull that same baseline commit from `https://github.com/chaitanya-mehrotra/NAGARSAATHI`.
 3. Continue Chaitanya's UI. Do not switch to Saish's interface or change its separate branch.
 4. Create separate branches: `feature/automated-processing` and `feature/role-workflows`.

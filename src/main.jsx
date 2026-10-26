@@ -597,7 +597,7 @@ function App() {
 
                   {success.analysis_status === "completed" && (
                     <div className="ai-panel" style={{ textAlign: "left", margin: "16px auto", maxWidth: "480px" }}>
-                      <strong>YOLO11n Detection Results</strong>
+                      <strong>YOLO11n AI Detection Results</strong>
                       <p>
                         {success.analysis?.detections?.length || 0} detections · {success.analysis?.model_version || "YOLO11n"}
                       </p>
@@ -611,7 +611,7 @@ function App() {
                           {issueLabels[d.label || d.class_name] || "Road issue"} · {Math.round(d.confidence * 100)}% model confidence
                         </p>
                       ))}
-                      <small>Model confidence assists review and is never confused with pothole severity.</small>
+                      <small>Model confidence assists review and is never confused with complaint priority.</small>
                     </div>
                   )}
 
