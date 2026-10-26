@@ -25,7 +25,7 @@ def connect():
 def init_db():
     with connect() as db:
         existing_columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
-        if existing_columns and "issue_id" not in existing_columns:
+        if existing_columns and ("issue_id" not in existing_columns or "verification_status" not in existing_columns):
             backups = DATA_DIR / "backups"
             backups.mkdir(exist_ok=True)
             with closing(sqlite3.connect(backups / f"before-issue-grouping-{time.time_ns()}.db")) as backup:
@@ -88,6 +88,34 @@ def init_db():
             reason TEXT NOT NULL,
             created_at INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS analysis_jobs (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id INTEGER UNIQUE NOT NULL REFERENCES reports(id),
+            state TEXT NOT NULL DEFAULT 'queued' CHECK(state IN ('queued','processing','completed','failed')),
+            attempts INTEGER NOT NULL DEFAULT 0,
+            available_at INTEGER NOT NULL,
+            lease_hash TEXT,
+            lease_until INTEGER,
+            worker_id TEXT,
+            candidate_ids TEXT NOT NULL DEFAULT '[]',
+            result_digest TEXT,
+            report_revision INTEGER NOT NULL DEFAULT 0,
+            error_code TEXT,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE INDEX IF NOT EXISTS jobs_available ON analysis_jobs(state,available_at,lease_until);
+        CREATE TABLE IF NOT EXISTS issue_history (
+            id INTEGER PRIMARY KEY,
+            issue_id INTEGER NOT NULL,
+            actor_id INTEGER REFERENCES users(id),
+            event TEXT NOT NULL,
+            details TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS worker_heartbeats (
+            worker_id TEXT PRIMARY KEY,
+            last_seen INTEGER NOT NULL
+        );
         """)
         # Additive migration: preserve all existing accounts, reports and photos.
         columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
@@ -98,18 +126,35 @@ def init_db():
             "submission_key": "TEXT",
             "submission_digest": "TEXT",
             "grouping_reason": "TEXT NOT NULL DEFAULT 'legacy_needs_review'",
+            "verification_status": "TEXT NOT NULL DEFAULT 'pending'",
+            "verification_reason": "TEXT NOT NULL DEFAULT 'Awaiting processing'",
+            "image_width": "INTEGER",
+            "image_height": "INTEGER",
+            "processing_revision": "INTEGER NOT NULL DEFAULT 0",
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE reports ADD COLUMN {name} {declaration}")
         db.execute("CREATE INDEX IF NOT EXISTS report_issue ON reports(issue_id)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS report_submission ON reports(user_id, submission_key) WHERE submission_key IS NOT NULL")
+        issue_columns = {r['name'] for r in db.execute('PRAGMA table_info(issues)')}
+        for name, declaration in {
+            'publication_mode': "TEXT NOT NULL DEFAULT 'legacy'",
+            'priority_score': 'REAL NOT NULL DEFAULT 0',
+            'priority_reason': "TEXT NOT NULL DEFAULT ''",
+            'priority_policy_version': "TEXT NOT NULL DEFAULT 'demand-age-v1'",
+        }.items():
+            if name not in issue_columns:
+                db.execute(f'ALTER TABLE issues ADD COLUMN {name} {declaration}')
+        if 'verification_status' not in columns:
+            db.execute("UPDATE reports SET verification_status='needs_review', verification_reason='Historical report: administrator review required'")
         try:
             from backend.grouping import new_issue, fingerprints
         except ImportError:
             from grouping import new_issue, fingerprints
         from PIL import Image, ImageOps
         historical_links = []
-        for report in db.execute("SELECT * FROM reports WHERE issue_id IS NULL ORDER BY id").fetchall():
+        for report in db.execute("""SELECT * FROM reports WHERE issue_id IS NULL
+            AND NOT EXISTS(SELECT 1 FROM analysis_jobs j WHERE j.report_id=reports.id) ORDER BY id""").fetchall():
             if report["duplicate_of"] is not None:
                 historical_links.append((report["id"], report["duplicate_of"]))
             issue_id = new_issue(db, report)

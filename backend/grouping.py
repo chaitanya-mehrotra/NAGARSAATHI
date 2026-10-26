@@ -2,6 +2,8 @@
 import hashlib
 import math
 
+from backend.policy import refresh_issue, record_event
+
 from PIL import Image
 
 
@@ -75,6 +77,7 @@ def assign_report(db, report_id):
 
 
 def summary(db, issue_id):
+    refresh_issue(db, issue_id)
     row = db.execute(
         """SELECT i.*, COUNT(r.id) AS report_count, COUNT(DISTINCT r.user_id) AS reporter_count,
         COUNT(DISTINCT COALESCE(r.image_sha256, 'legacy:' || r.id)) AS unique_photo_count,
@@ -90,3 +93,57 @@ def summary(db, issue_id):
     # Representative identity is an internal relationship, not municipal report access.
     result.pop("representative_report_id")
     return result
+
+
+def nearby_reports(db, report):
+    rows = db.execute("""SELECT r.* FROM reports r JOIN issues i ON i.id=r.issue_id
+        WHERE r.id<>? AND r.issue_type=? AND r.verification_status='supported'
+        AND i.status IN ('open','in_progress') AND r.created_at>=? ORDER BY r.id DESC""",
+        (report['id'], report['issue_type'], report['created_at'] - 30 * 86400)).fetchall()
+    return [r for r in rows if distance_metres(report['latitude'], report['longitude'], r['latitude'], r['longitude']) <= 30]
+
+
+def apply_automatic_grouping(db, report_id, visual_matches, visual_enabled=False):
+    """Server decides membership using trusted stored category, time, location and evidence."""
+    report = db.execute('SELECT * FROM reports WHERE id=?', (report_id,)).fetchone()
+    old_id = report['issue_id']
+    nearby = nearby_reports(db, report)
+    valid = []
+    copies = db.execute('SELECT latitude,longitude FROM reports WHERE id<>? AND image_sha256=?',
+                        (report_id, report['image_sha256'])).fetchall()
+    far_copy = any(distance_metres(report['latitude'], report['longitude'], r['latitude'], r['longitude']) > 30 for r in copies)
+    for other in nearby:
+        anchor = db.execute('SELECT latitude,longitude FROM issues WHERE id=?', (other['issue_id'],)).fetchone()
+        if distance_metres(report['latitude'], report['longitude'], anchor['latitude'], anchor['longitude']) > 30:
+            continue
+        if report['image_sha256'] == other['image_sha256']:
+            valid.append((other, 'exact_photo_nearby'))
+        elif visual_enabled:
+            evidence = next((m for m in visual_matches if m['report_id'] == other['id']), None)
+            if evidence and evidence['inliers'] >= 20 and evidence['inlier_ratio'] >= .8 and evidence['coverage'] >= .25:
+                valid.append((other, 'orb-defect-v1'))
+    issue_ids = {r['issue_id'] for r, _ in valid}
+    supported = report['verification_status'] == 'supported'
+    ambiguous = bool(far_copy or len(issue_ids) > 1 or (nearby and not valid))
+    if supported and not ambiguous and len(issue_ids) == 1:
+        target, reason = valid[0]
+        issue_id = target['issue_id']
+    else:
+        issue_id = old_id or new_issue(db, report)
+        reason = 'ambiguous_duplicate' if supported and ambiguous else ('new_supported_issue' if supported else 'unconfirmed_evidence')
+    if reason == 'ambiguous_duplicate':
+        db.execute("UPDATE reports SET verification_status='needs_review', verification_reason=? WHERE id=?",
+                   ('Photo evidence exists but location or duplicate matching needs review; your report is retained', report_id))
+    db.execute('UPDATE reports SET issue_id=?,duplicate_of=NULL,grouping_reason=?,status=(SELECT status FROM issues WHERE id=?) WHERE id=?',
+               (issue_id, reason, issue_id, report_id))
+    if old_id and old_id != issue_id:
+        sync_representative(db, old_id)
+    db.execute('DELETE FROM duplicate_candidates WHERE report_id=?', (report_id,))
+    for candidate in nearby:
+        if candidate['issue_id'] != issue_id:
+            db.execute('INSERT OR IGNORE INTO duplicate_candidates VALUES(?,?,?)', (report_id, candidate['issue_id'], 'requires_visual_review'))
+    # Previously forwarded historical/manual decisions are never silently overturned.
+    db.execute("UPDATE issues SET publication_mode='automatic' WHERE id=? AND publication_mode='legacy' AND published=0", (issue_id,))
+    refresh_issue(db, issue_id)
+    record_event(db, issue_id, 'automatic_processing', {'report_id': report_id, 'grouping_reason': reason, 'policy': 'grouping-v1'})
+    return issue_id

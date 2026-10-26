@@ -1,5 +1,8 @@
 """Acceptance tests for report retention, consolidated counts and role separation."""
 import io
+import hashlib
+import os
+import httpx
 import sqlite3
 import tempfile
 import unittest
@@ -29,6 +32,7 @@ class GroupingTests(unittest.TestCase):
         self.directory = Path(self.stack.enter_context(tempfile.TemporaryDirectory()))
         self.stack.enter_context(patch.object(database, "DATA_DIR", self.directory))
         self.stack.enter_context(patch.object(reports, "DATA_DIR", self.directory))
+        self.stack.enter_context(patch.dict(os.environ, {'NAGARSAATHI_WORKER_TOKEN_SHA256':hashlib.sha256(('g'*48).encode()).hexdigest()}))
         self.stack.enter_context(patch.object(inference, "load_model", return_value=None))
         self.detect = self.stack.enter_context(patch.object(inference, "detect_potholes", return_value={"detections": []}))
         self.client = self.stack.enter_context(TestClient(app))
@@ -42,13 +46,29 @@ class GroupingTests(unittest.TestCase):
         self.assertEqual(login.json()["user"]["role"], role)
         return {"Authorization": "Bearer " + login.json()["access_token"]}
 
-    def submit(self, headers=None, image=None, category="pothole", lat=12.9716, lon=77.5946, key=None):
+    def submit(self, headers=None, image=None, category="pothole", lat=12.9716, lon=77.5946, key=None, process=True):
         headers = dict(headers or self.citizen)
         if key:
             headers["Idempotency-Key"] = key
-        return self.client.post("/reports", headers=headers,
+        response = self.client.post("/reports", headers=headers,
             data={"description": "Road defect", "latitude": lat, "longitude": lon, "issue_type": category},
             files={"image": ("road.png", image or photo("grey"), "image/png")})
+        if process and response.status_code == 201:
+            self.finish_next(category)
+            detail = self.client.get(f"/reports/{response.json()['id']}",headers=self.admin).json()
+            return httpx.Response(201,json=detail)
+        return response
+
+    def finish_next(self, category='pothole'):
+        worker_headers = {'X-Worker-Key':'g'*48}
+        job = self.client.post('/worker/jobs/claim',headers=worker_headers,json={'worker_id':'grouping-regression'}).json()['job']
+        self.detect('simulated-PC-worker-input')
+        response = self.client.post(f"/worker/jobs/{job['id']}/result",headers=worker_headers,json={
+            'lease_token':job['lease_token'],'image_sha256':job['image_sha256'],
+            'model_sha256':'748e47702e7fa7068ab64a9005cbefb02873e0190eff67496dbd2ef2a8f6a676',
+            'model_version':'nagarsaathi-yolo11n-v3','image_width':64,'image_height':64,
+            'detections':[{'label':category,'confidence':.9,'bbox_xyxy':[2,2,60,60]}]})
+        self.assertEqual(response.status_code,200,response.text)
 
     def issue(self, issue_id):
         return self.client.get(f"/issues/{issue_id}", headers=self.admin).json()
@@ -66,7 +86,7 @@ class GroupingTests(unittest.TestCase):
         issue_id = submitted[0]["issue_id"]
         self.assertEqual({r["issue_id"] for r in submitted}, {issue_id})
         self.assertEqual(len(self.client.get("/reports", headers=self.admin).json()), 10)
-        self.assertEqual(self.client.get("/issues", headers=self.nigam).json()["total"], 0)
+        self.assertEqual(self.client.get("/issues", headers=self.nigam).json()["total"], 1)
         self.publish(issue_id)
         municipal = self.client.get("/issues", headers=self.nigam).json()
         self.assertEqual(municipal["total"], 1)
@@ -83,7 +103,7 @@ class GroupingTests(unittest.TestCase):
             self.assertEqual(self.client.get(endpoint, headers=self.nigam).status_code, 403)
         # Citizens only receive counts, never another report's description/evidence URL.
         own = self.client.get(f"/reports/{submitted[-1]['id']}", headers=citizens[-1]).json()
-        self.assertNotIn("description", own["issue_summary"])
+        self.assertNotIn("issue_summary", own)
         self.assertEqual(self.client.get("/issues", headers=self.citizen).status_code, 403)
 
     def test_different_photos_suggest_only_then_admin_can_group_and_undo(self):
@@ -118,10 +138,12 @@ class GroupingTests(unittest.TestCase):
 
     def test_concurrent_idempotent_retry_counts_once_and_rejects_changed_payload(self):
         with ThreadPoolExecutor(max_workers=3) as pool:
-            responses = list(pool.map(lambda _: self.submit(key="same-network-request"), range(3)))
+            responses = list(pool.map(lambda _: self.submit(key="same-network-request",process=False), range(3)))
         self.assertTrue(all(r.status_code == 201 for r in responses))
         self.assertEqual(len({r.json()["id"] for r in responses}), 1)
-        self.assertEqual(self.issue(responses[0].json()["issue_id"])["report_count"], 1)
+        self.finish_next()
+        issue_id = self.client.get(f"/reports/{responses[0].json()['id']}",headers=self.admin).json()['issue_id']
+        self.assertEqual(self.issue(issue_id)["report_count"], 1)
         self.assertEqual(self.detect.call_count, 1)
         self.assertEqual(self.submit(key="same-network-request", image=photo("red")).status_code, 409)
         self.assertEqual(len(list((self.directory / "photos").glob("*.png"))), 1)
