@@ -143,6 +143,13 @@ def process_once(
                 fail_job(connection, job, worker, "provider_error")
                 return True
             category, reason = mapped_category(results, current["claimed_category"])
+            is_suspicious = False
+            suspicious_reason = None
+            if results and any(r.labels for r in results):
+                detected_labels = [label.label for r in results for label in r.labels]
+                if reason == "claimed_category_conflict_or_manual_category" or (category is None and reason not in {"human_review_required", "photo_needs_review"}):
+                    is_suspicious = True
+                    suspicious_reason = f"Model detection mismatch: claimed '{current['claimed_category']}' but detector predicted '{', '.join(detected_labels)}'"
             if validator is None:
                 reason = "human_review_required"
             point = IssuePoint.model_validate(current["location_evidence"].get("point", {}))
@@ -164,7 +171,8 @@ def process_once(
             connection.execute(
                 text("""
                 UPDATE reports SET canonical_category=:category,validation_status=:status,
-                  validation_revision=content_revision,review_reason=:reason,state=:state,updated_at=now()
+                  validation_revision=content_revision,review_reason=:reason,state=:state,
+                  is_suspicious=:is_suspicious,suspicious_reason=:suspicious_reason,updated_at=now()
                 WHERE id=:id
             """),
                 {
@@ -173,6 +181,8 @@ def process_once(
                     "status": status,
                     "state": state,
                     "reason": reason,
+                    "is_suspicious": is_suspicious,
+                    "suspicious_reason": suspicious_reason,
                 },
             )
             if accepted and location.state == "located":

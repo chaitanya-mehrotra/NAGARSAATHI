@@ -1,19 +1,96 @@
-name: nagarsaathi-local
+name: nagarsaathi-v2
+
 services:
   db:
-    image: postgis/postgis:17-3.5@sha256:01a6a70e41e6c4467c8f55f6063555ed72db2d6662cd0d571040d42eadaeb6f6
+    image: postgis/postgis:16-3.4
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nagarsaathi_demo}
-      POSTGRES_USER: ${POSTGRES_USER:-nagarsaathi_demo}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-local_demo_only}
+      POSTGRES_DB: ${POSTGRES_DB:-nagarsaathi_v2}
+      POSTGRES_USER: ${POSTGRES_USER:-nagarsaathi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nagarsaathi_secret_local}
     ports:
-      - "127.0.0.1:55432:5432"
+      - "127.0.0.1:5432:5432"
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - v2_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
       interval: 5s
       timeout: 5s
       retries: 20
+
+  migrate:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      APP_MODE: ${APP_MODE:-development}
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      db:
+        condition: service_healthy
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      APP_MODE: ${APP_MODE:-development}
+      JWT_SECRET: ${JWT_SECRET:-local_dev_jwt_secret_must_change_in_prod_32chars}
+      MEDIA_STORAGE_DIR: /app/.local/media
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
+      SMTP_HOST: ${SMTP_HOST:-mailbox}
+      SMTP_PORT: ${SMTP_PORT:-2500}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - v2_media_data:/app/.local/media
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  worker:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/worker.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      APP_MODE: ${APP_MODE:-development}
+      MEDIA_STORAGE_DIR: /app/.local/media
+    volumes:
+      - v2_media_data:/app/.local/media
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
+  web:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/web.Dockerfile
+    ports:
+      - "127.0.0.1:5173:80"
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+
+  mailbox:
+    image: inbucket/inbucket:3.0.4
+    ports:
+      - "127.0.0.1:9000:9000" # Web UI
+      - "127.0.0.1:2500:2500" # SMTP
+    restart: unless-stopped
+
 volumes:
-  postgres_data:
+  v2_postgres_data:
+    name: nagarsaathi_v2_postgres_data
+  v2_media_data:
+    name: nagarsaathi_v2_media_data

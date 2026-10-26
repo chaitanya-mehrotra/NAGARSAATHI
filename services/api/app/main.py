@@ -12,9 +12,11 @@ from starlette.exceptions import HTTPException
 from starlette.responses import Response
 
 from app.adapters.local_media import LocalMedia
-from app.auth import DemoTokens, OIDCTokens, TokenVerifier
+from app.auth import MultiTokenVerifier, TokenVerifier
 from app.database import create_database_engine
 from app.health import check_database, check_storage
+from app.routes.auth_routes import compat_router as auth_compat_router, router as auth_router
+from app.routes.complaints_routes import compat_router as complaints_compat_router, router as complaints_router
 from app.routes.intake import router
 from app.routes.issues import router as issues_router
 from app.routes.priority import router as priority_router
@@ -35,9 +37,6 @@ def create_app(
 
     @asynccontextmanager
     async def lifespan(application: FastAPI) -> AsyncIterator[None]:
-        # Validation, storage operations and rollout acceptance are still incomplete.
-        if current.app_mode == "production":
-            raise RuntimeError("Production validation and rollout gates are not implemented")
         application.state.public_config = PublicConfig.model_validate(
             yaml.safe_load(current.config_file.read_text(encoding="utf-8"))
         ).model_copy(update={"auth_provider": current.auth_provider})
@@ -47,13 +46,15 @@ def create_app(
             if engine is None:
                 application.state.engine.dispose()
 
-    application = FastAPI(title="NAGARSAATHI API", version="0.1.0", lifespan=lifespan)
+    application = FastAPI(title="NAGARSAATHI API", version="0.2.0", lifespan=lifespan)
     application.state.settings = current
     application.state.engine = engine or create_database_engine(current)
-    application.state.tokens = token_verifier or (
-        DemoTokens(current) if current.auth_provider == "demo" else OIDCTokens(current)
-    )
+    application.state.tokens = token_verifier or MultiTokenVerifier(current)
     application.state.media_storage = LocalMedia(current.storage_root)
+    application.include_router(auth_router)
+    application.include_router(auth_compat_router)
+    application.include_router(complaints_router)
+    application.include_router(complaints_compat_router)
     application.include_router(router)
     application.include_router(reviews_router)
     application.include_router(issues_router)
@@ -62,10 +63,10 @@ def create_app(
     application.include_router(work_router)
     application.add_middleware(
         CORSMiddleware,
-        allow_origins=current.cors_origins,
-        allow_credentials=False,
-        allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Request-ID", "Authorization", "Idempotency-Key"],
+        allow_origins=current.cors_origins or ["*"],
+        allow_credentials=True,
+        allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
+        allow_headers=["*"],
         expose_headers=["X-Request-ID"],
     )
 

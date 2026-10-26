@@ -72,13 +72,14 @@ def seed_foundation(
         ).scalar_one_or_none()
         if unchanged is False:
             raise ValueError("Changed area geometry requires a new boundary_version")
+        traffic_weight = 1.25 if props["code"] == "south_central" else 1.15 if props["code"] in ("north_central", "northeast", "southeast") else 1.0
         connection.execute(
             text("""
             INSERT INTO areas (id,pilot_id,code,display_name,geom,boundary_version,
-                               provenance,effective_from)
+                               provenance,effective_from,traffic_weight)
             VALUES (:id,:pilot,:code,:name,ST_SetSRID(ST_GeomFromGeoJSON(:geometry),4326),
-                    :version,CAST(:provenance AS jsonb),'2026-10-03T00:00:00Z')
-            ON CONFLICT (id) DO NOTHING
+                    :version,CAST(:provenance AS jsonb),'2026-10-03T00:00:00Z',:traffic_weight)
+            ON CONFLICT (id) DO UPDATE SET traffic_weight = EXCLUDED.traffic_weight
         """),
             {
                 "id": area_id,
@@ -88,6 +89,7 @@ def seed_foundation(
                 "geometry": geometry_json(feature),
                 "version": props["boundary_version"],
                 "provenance": json.dumps(props),
+                "traffic_weight": traffic_weight,
             },
         )
     partition = verify_area_partition(connection, pilot_id)

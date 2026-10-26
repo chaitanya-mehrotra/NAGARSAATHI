@@ -14,6 +14,7 @@ class Role(StrEnum):
     REVIEWER = "reviewer"
     OPERATOR = "operator"
     ADMIN = "admin"
+    NIGAM = "nigam"
 
 
 class ReportState(StrEnum):

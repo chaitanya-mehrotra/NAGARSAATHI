@@ -1,0 +1,50 @@
+name: nagarsaathi-v2-dev
+
+services:
+  db:
+    image: postgis/postgis:16-3.4
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-nagarsaathi_v2}
+      POSTGRES_USER: ${POSTGRES_USER:-nagarsaathi}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nagarsaathi_secret_local}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - v2_dev_postgres_data:/var/lib/postgresql/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  api:
+    build:
+      context: .
+      dockerfile: infrastructure/docker/api.Dockerfile
+    environment:
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      APP_MODE: development
+      JWT_SECRET: local_dev_jwt_secret_must_change_in_prod_32chars
+      MEDIA_STORAGE_DIR: /app/.local/media
+      CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
+    volumes:
+      - ./services/api:/app/services/api
+      - ./config:/app/config
+      - v2_dev_media_data:/app/.local/media
+    command: ["uvicorn", "services.api.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      db:
+        condition: service_healthy
+
+  mailbox:
+    image: inbucket/inbucket:3.0.4
+    ports:
+      - "127.0.0.1:9000:9000"
+      - "127.0.0.1:2500:2500"
+
+volumes:
+  v2_dev_postgres_data:
+  v2_dev_media_data:

@@ -48,7 +48,11 @@ def score(inputs: ScoreInputs, policy: Policy) -> Score:
         "U": clamp(inputs.urgency_override if inputs.urgency_override is not None else 0.5),
     }
     contributions = {key: 100 * policy.weights[key] * value for key, value in factors.items()}
-    total = round(min(100, max(0, sum(contributions.values()))), 2)
+    zone_weight = getattr(inputs, "zone_traffic_weight", 1.0) or 1.0
+    if zone_weight > 1.0:
+        flags.append(f"traffic_heavy_zone_boost_{int(round((zone_weight - 1.0) * 100))}_pct")
+    base_sum = sum(contributions.values())
+    total = round(min(100.0, max(0.0, base_sum * zone_weight)), 2)
     return Score(
         score=total,
         band="critical"

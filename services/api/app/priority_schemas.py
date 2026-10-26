@@ -47,6 +47,7 @@ class ScoreInputs(Contract):
     coverage_complete: bool = False
     critical_override: bool = False
     critical_review_due_at: AwareDatetime | None = None
+    zone_traffic_weight: float = Field(default=1.0, ge=0.5, le=3.0)
 
 
 class Score(Contract):

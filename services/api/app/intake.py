@@ -106,6 +106,8 @@ def report_detail(connection: Connection, report_id: UUID, actor: Actor) -> Repo
         trusted_asset_id=row["trusted_asset_id"],
         evidence_reused=row["evidence_reused"],
         reported_hazard=evidence.get("reported_hazard", False),
+        is_suspicious=bool(row["is_suspicious"]) if "is_suspicious" in row else False,
+        suspicious_reason=row["suspicious_reason"] if "suspicious_reason" in row else None,
         review_reason=row["review_reason"],
         canonical_location=IssuePoint(longitude=row["lon"], latitude=row["lat"], confirmed=True)
         if row["area_id"] is not None

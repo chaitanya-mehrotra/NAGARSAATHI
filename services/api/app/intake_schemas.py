@@ -23,11 +23,17 @@ class Actor(Contract):
     synthetic: bool
 
     def has_role(self, role: Role) -> bool:
-        return any(grant.role == role for grant in self.grants)
+        if role == Role.CITIZEN:
+            return True
+        return any(
+            grant.role == role
+            or (role in {Role.REVIEWER, Role.OPERATOR} and grant.role in {Role.ADMIN, Role.NIGAM})
+            for grant in self.grants
+        )
 
     def can_review(self, area_id: UUID | None) -> bool:
         return any(
-            grant.role in {Role.ADMIN, Role.REVIEWER}
+            grant.role in {Role.ADMIN, Role.REVIEWER, Role.NIGAM}
             and (grant.area_id is None or grant.area_id == area_id)
             for grant in self.grants
         )
@@ -99,6 +105,8 @@ class ReportDetail(Contract):
     trusted_asset_id: UUID | None = None
     evidence_reused: bool = False
     reported_hazard: bool = False
+    is_suspicious: bool = False
+    suspicious_reason: str | None = None
 
 
 class ReportPage(Contract):

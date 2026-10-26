@@ -102,6 +102,10 @@ def snapshot(
     """),
         {"id": issue["id"]},
     ).scalar_one()
+    traffic_weight: float = connection.execute(
+        text("SELECT COALESCE(traffic_weight, 1.0) FROM areas WHERE id=:area_id"),
+        {"area_id": issue["area_id"]},
+    ).scalar_one_or_none() or 1.0
     inputs = ScoreInputs(
         as_of=as_of,
         first_accepted_at=issue["first_accepted_at"],
@@ -111,6 +115,7 @@ def snapshot(
         urgency_override=issue["urgency_override"],
         critical_override=issue["critical_override"],
         critical_review_due_at=issue["critical_review_due_at"],
+        zone_traffic_weight=traffic_weight,
         **location_context(connection, issue["id"], scoring_epoch["poi_snapshot_id"], policy),
     )
     recent: int = connection.execute(
