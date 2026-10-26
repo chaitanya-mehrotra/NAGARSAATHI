@@ -57,3 +57,6 @@ test("both selection allows partial support", () => {
     "Supported by image",
   );
 });
+
+// Keep the existing npm test entry point; no shared build configuration change.
+import './workflows.test.js';
