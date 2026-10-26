@@ -11,6 +11,7 @@ import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { LocateFixed, Maximize2 } from "lucide-react";
 import { issueLabels, statusLabels } from "./validation";
+import { Photo } from "./ui";
 const center = [12.9716, 77.5946];
 function icon(type) {
   return L.divIcon({
@@ -116,18 +117,8 @@ export default function ComplaintMap({
               <p>
                 {issueLabels[r.issue_type] || "Issue"} · {statusLabels[r.status] || r.status}
               </p>
-              {r.photo_url && (
-                <img
-                  className="popup-photo"
-                  src={
-                    r.photo_url.startsWith("http")
-                      ? r.photo_url
-                      : `http://127.0.0.1:8001${r.photo_url}?token=${localStorage.getItem("nagarsaathi_token") || ""}`
-                  }
-                  alt="Reported issue"
-                />
-              )}
-              <p>{r.description.slice(0, 90)}</p>
+              {r.photo_url && <Photo path={`/reports/${r.id}/photo`} />}
+              <p>{(r.description || "").slice(0, 90)}</p>
               <small>
                 {new Date(
                   typeof r.created_at === "number" && r.created_at < 1e11
@@ -135,7 +126,7 @@ export default function ComplaintMap({
                     : r.created_at
                 ).toLocaleDateString()}
               </small>
-              <button className="text-button" onClick={() => onDetails(r)}>
+              <button className="text-button" onClick={() => onDetails?.(r)}>
                 View details →
               </button>
             </Popup>

@@ -1,159 +1,76 @@
-import { validateAnalysis } from "./validation";
-
-export const configured = true;
-export const supabase = null;
-
-const base = (import.meta.env.VITE_API_BASE_URL || "http://127.0.0.1:8001").replace(/\/$/, "");
-
-const TOKEN_KEY = "nagarsaathi_token";
-const USER_KEY = "nagarsaathi_user";
-
-export function reportPhotoUrl(path) {
-  const apiOrigin = new URL(base, window.location.origin).origin;
-  const url = new URL(path.startsWith("http") ? path : `${base}${path}`, window.location.origin);
-  if (url.origin !== apiOrigin) throw new Error("Unexpected photo service origin");
-  url.searchParams.set("token", getStoredToken());
-  return url.toString();
-}
-
-export function getStoredToken() {
-  return localStorage.getItem(TOKEN_KEY) || "";
-}
-
-export function getStoredUser() {
-  try {
-    const raw = localStorage.getItem(USER_KEY);
-    return raw ? JSON.parse(raw) : null;
-  } catch {
-    return null;
-  }
-}
-
-export function setSession(token, user) {
-  if (token) localStorage.setItem(TOKEN_KEY, token);
-  if (user) localStorage.setItem(USER_KEY, JSON.stringify(user));
-}
-
+const env = import.meta.env || {};
+export const base = (env.VITE_API_BASE_URL || (env.DEV ? 'http://127.0.0.1:8002' : '/api')).replace(/\/$/, '');
+const TOKEN = 'nagarsaathi_token';
+const USER = 'nagarsaathi_user';
+export const SESSION_EVENT = 'nagarsaathi-session';
+let revision = 0;
+export function getStoredToken() { return localStorage.getItem(TOKEN) || ''; }
 export function clearSession() {
-  localStorage.removeItem(TOKEN_KEY);
-  localStorage.removeItem(USER_KEY);
+  revision++;
+  localStorage.removeItem(TOKEN);
+  localStorage.removeItem(USER);
+  window.dispatchEvent(new Event(SESSION_EVENT));
 }
-
-export async function identity() {
-  const token = getStoredToken();
-  if (!token) return null;
-  try {
-    const user = await request("/auth/me");
-    setSession(token, user);
-    return { token, user };
-  } catch {
-    clearSession();
-    return null;
-  }
+export function setSession(token) {
+  revision++;
+  localStorage.removeItem(USER); // Never trust a cached role.
+  localStorage.setItem(TOKEN, token);
+  window.dispatchEvent(new Event(SESSION_EVENT));
 }
-
-export async function register(name, email, password) {
-  const response = await fetch(`${base}/auth/register`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ name, email, password }),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error?.message || data.detail || "Registration failed");
-  }
-  return data;
+export function observeSessions(listener) {
+  const storage = event => { if (!event.key || [TOKEN, USER].includes(event.key)) { revision++; listener(); } };
+  window.addEventListener('storage', storage);
+  window.addEventListener(SESSION_EVENT, listener);
+  return () => { window.removeEventListener('storage', storage); window.removeEventListener(SESSION_EVENT, listener); };
 }
-
-export async function login(email, password) {
-  const response = await fetch(`${base}/auth/login`, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ email, password }),
-  });
-  const data = await response.json();
-  if (!response.ok) {
-    throw new Error(data.error?.message || data.detail || "Invalid email or password");
-  }
-  setSession(data.access_token, data.user);
-  return data;
-}
-
-export async function logout() {
-  try {
-    await request("/auth/logout", { method: "POST" });
-  } catch {
-    // Ignore network errors on logout
-  }
-  clearSession();
-}
-
 export async function request(path, options = {}) {
-  const token = getStoredToken();
-  const headers = { ...options.headers };
-  if (token) {
-    headers["Authorization"] = `Bearer ${token}`;
-  }
-
+  const token = getStoredToken(), version = revision;
   const response = await fetch(base + path, {
-    ...options,
-    headers,
+    ...options, headers: { ...options.headers, ...(token ? { Authorization: `Bearer ${token}` } : {}) },
   });
-
-  if (response.status === 204) {
-    return null;
-  }
-
+  if (version !== revision || token !== getStoredToken()) throw new DOMException('Session changed', 'AbortError');
+  if (response.status === 401 && token) { clearSession(); throw new Error('Your session has expired. Please sign in again.'); }
+  if (response.status === 204 && response.ok) return null;
   let data;
-  try {
-    data = await response.json();
-  } catch {
-    throw new Error("The reporting service returned an unreadable response.");
-  }
-
+  try { data = await response.json(); } catch { throw new Error('The service returned an unreadable response. Please retry.'); }
+  if (version !== revision || token !== getStoredToken()) throw new DOMException('Session changed', 'AbortError');
   if (!response.ok) {
-    const errorMsg = data.error?.message || data.detail || "The request could not be completed. Please retry.";
-    throw new Error(typeof errorMsg === "string" ? errorMsg : "Request error");
+    const message = data.error?.message || data.detail;
+    throw new Error(typeof message === 'string' ? message : `Request failed (${response.status}). Please retry.`);
   }
   return data;
 }
-
-export async function analyze(file, signal) {
-  const form = new FormData();
-  form.append("image", file);
-  const raw = await request("/dev/detect", { method: "POST", body: form, signal });
-  
-  // Normalize detections to standard format for frontend boxes
-  const normalized = {
-    model_version: raw.model_version || "YOLO11n",
-    image_width: raw.image_width,
-    image_height: raw.image_height,
-    detections: (raw.detections || []).map((d) => ({
-      class_name: d.label || d.class_name || "pothole",
-      confidence: d.confidence,
-      bbox: d.bbox_xyxy || d.bbox || [0, 0, 0, 0],
-    })),
-  };
-  return validateAnalysis(normalized);
+export const identity = signal => request('/auth/me', { signal });
+export async function login(email, password, signal) {
+  const result = await request('/auth/login', { method: 'POST', signal,
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+  if (!result.access_token) throw new Error('The sign-in response did not contain a session.');
+  setSession(result.access_token);
 }
-
-export async function submit(form) {
+export const register = (name, email, password, signal) => request('/auth/register', {
+  method: 'POST', signal, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, email, password }),
+});
+export async function logout() {
+  const token = getStoredToken();
+  clearSession(); // Clear the screen immediately, including while the network is offline.
+  if (token) await fetch(base + '/auth/logout', { method: 'POST', headers: { Authorization: `Bearer ${token}` } }).catch(() => {});
+}
+export const json = (method, body) => ({ method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+export const submit = (form, key, signal) => {
   const body = new FormData();
-  body.append("image", form.file);
-  body.append("description", String(form.description || ""));
-  body.append("latitude", String(form.latitude));
-  body.append("longitude", String(form.longitude));
-  body.append("issue_type", String(form.issue_type || "pothole"));
-
-  return request("/reports", { method: "POST", body,
-    headers: form.submissionKey ? { "Idempotency-Key": form.submissionKey } : {},
-  });
-}
-
-export async function updateReport(id, reviewData) {
-  return request(`/reports/${id}`, {
-    method: "PATCH",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(reviewData),
-  });
+  body.append('image', form.file);
+  for (const field of ['description', 'latitude', 'longitude', 'issue_type']) body.append(field, String(form[field]));
+  return request('/reports', { method: 'POST', body, signal, headers: { 'Idempotency-Key': key } });
+};
+export async function photoBlob(path, signal) {
+  // Only authenticated API paths, never tokens in URLs, arbitrary origins or signed links.
+  if (!/^\/(reports|issues)\/[a-zA-Z0-9-]+\/photo$/.test(path)) throw new Error('Invalid photo path');
+  const token = getStoredToken(), version = revision;
+  const response = await fetch(base + path, { signal, headers: { Authorization: `Bearer ${token}` } });
+  if (version !== revision || token !== getStoredToken()) throw new DOMException('Session changed', 'AbortError');
+  if (response.status === 401) { clearSession(); throw new Error('Please sign in again.'); }
+  if (!response.ok) throw new Error('Photo unavailable. Please retry.');
+  const blob = await response.blob();
+  if (!blob.type.startsWith('image/')) throw new Error('Photo response is not an image.');
+  return blob;
 }
