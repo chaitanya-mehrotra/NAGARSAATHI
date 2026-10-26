@@ -1,0 +1,17 @@
+{
+  "policy": "orb-defect-v1",
+  "runtime": {
+    "opencv": "5.0.0",
+    "numpy": "2.5.4"
+  },
+  "scope": "48 synthetic textured-image pairs: 24 known transforms, 24 unrelated sources",
+  "counts": {
+    "true_positive": 24,
+    "false_positive": 0,
+    "true_negative": 24,
+    "false_negative": 0
+  },
+  "precision": 1.0,
+  "recall": 1.0,
+  "limitations": "Controlled image transforms establish implementation behavior only. No field-labelled road matching set is available; arbitrary-angle same-issue reliability is unmeasured."
+}

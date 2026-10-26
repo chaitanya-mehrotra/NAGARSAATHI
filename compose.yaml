@@ -8,6 +8,9 @@ services:
     volumes:
       - complaint_data:/var/data
     restart: unless-stopped
+    environment:
+      NAGARSAATHI_WORKER_TOKEN_SHA256: ${NAGARSAATHI_WORKER_TOKEN_SHA256:-}
+      NAGARSAATHI_VISUAL_AUTO_MERGE: ${NAGARSAATHI_VISUAL_AUTO_MERGE:-0}
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:10000/api/ready',timeout=5)"]
       start_period: 90s

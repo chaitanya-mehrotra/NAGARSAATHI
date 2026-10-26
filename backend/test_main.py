@@ -1,5 +1,7 @@
 """Comprehensive test suite for NAGARSAATHI Phase 2 backend."""
 import io
+import hashlib
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -19,6 +21,7 @@ class BackendComprehensiveTests(unittest.TestCase):
             temp_path = Path(temp_dir)
             with patch.object(database, "DATA_DIR", temp_path), \
                  patch.object(reports, "DATA_DIR", temp_path), \
+                 patch.dict(os.environ, {'NAGARSAATHI_WORKER_TOKEN_SHA256':hashlib.sha256(('t'*48).encode()).hexdigest()}), \
                  patch.object(inference, "load_model", return_value=None):
 
                 with TestClient(app) as client:
@@ -103,7 +106,16 @@ class BackendComprehensiveTests(unittest.TestCase):
                             files={"image": ("road.png", content, "image/png")}
                         )
 
-                    # 3. Model detection: zero boxes
+                    def complete_empty_job():
+                        worker_headers = {'X-Worker-Key':'t'*48}
+                        job = client.post('/worker/jobs/claim',headers=worker_headers,json={'worker_id':'regression-pc'}).json()['job']
+                        result = client.post(f"/worker/jobs/{job['id']}/result",headers=worker_headers,json={
+                            'lease_token':job['lease_token'],'image_sha256':job['image_sha256'],
+                            'model_sha256':'748e47702e7fa7068ab64a9005cbefb02873e0190eff67496dbd2ef2a8f6a676',
+                            'model_version':'nagarsaathi-yolo11n-v3','image_width':64,'image_height':64,'detections':[]})
+                        self.assertEqual(result.status_code,200,result.text)
+
+                    # 3. Queue processing: zero boxes is a review case, not rejection.
                     empty_detection = {
                         "image_width": 64,
                         "image_height": 64,
@@ -116,18 +128,25 @@ class BackendComprehensiveTests(unittest.TestCase):
                         self.assertEqual(rep1_resp.status_code, 201)
                         rep1 = rep1_resp.json()
                         rep1_id = rep1["id"]
+                        self.assertEqual(rep1['verification_status'],'pending')
+                        self.assertNotIn('analysis',rep1)
+                        complete_empty_job()
+                        rep1 = client.get(f'/reports/{rep1_id}',headers=admin_headers).json()
                         self.assertEqual(rep1["analysis_status"], "completed")
                         self.assertEqual(rep1["analysis"]["detections"], [])
                         self.assertEqual(rep1["status"], "open")
                         self.assertEqual(rep1["priority"], "normal")
 
-                    # Nearby duplicate detection suggestion (within 30m)
+                    # Empty detections do not confirm duplicates from distance alone.
                     with patch.object(inference, "detect_potholes", return_value=empty_detection):
                         # Same location from citizen2
                         rep2_resp = submit(headers=headers2, desc="Another complaint at junction")
                         self.assertEqual(rep2_resp.status_code, 201)
                         rep2 = rep2_resp.json()
-                        self.assertEqual(rep2["duplicate_of"], rep1_id)
+                        complete_empty_job()
+                        rep2 = client.get(f"/reports/{rep2['id']}",headers=admin_headers).json()
+                        self.assertIsNone(rep2['duplicate_of'])
+                        self.assertNotEqual(rep1['issue_id'],rep2['issue_id'])
 
                     # 4. Model detection: exception / failure handling
                     with patch.object(inference, "detect_potholes", side_effect=RuntimeError("GPU OOM / Timeout")):
@@ -135,15 +154,13 @@ class BackendComprehensiveTests(unittest.TestCase):
                         self.assertEqual(rep3_resp.status_code, 201)
                         rep3 = rep3_resp.json()
                         # Safe storage: complaint is still saved despite model failure
-                        self.assertEqual(rep3["analysis_status"], "failed")
+                        self.assertEqual(rep3["verification_status"], "pending")
                         self.assertEqual(rep3["status"], "open")
 
                     # 5. Model unavailable handling
-                    app.state.model_ready = False
                     rep4_resp = submit(headers=headers1, desc="Complaint when model unavailable")
                     self.assertEqual(rep4_resp.status_code, 201)
-                    self.assertEqual(rep4_resp.json()["analysis_status"], "unavailable")
-                    app.state.model_ready = True
+                    self.assertEqual(rep4_resp.json()["verification_status"], "pending")
 
                     # 6. Invalid image content rejection
                     bad_img_resp = submit(headers=headers1, content=b"not an image file")
@@ -157,7 +174,7 @@ class BackendComprehensiveTests(unittest.TestCase):
                             "/dev/detect", headers=headers1,
                             files={"image": ("invalid.jpg", b"invalid bytes", "image/jpeg")},
                         )
-                        self.assertEqual(invalid_analysis.status_code, 400)
+                        self.assertEqual(invalid_analysis.status_code, 403)
 
                     # 7. Role-based Access Control (Citizens see only their own)
                     # Citizen 2 cannot access Citizen 1's report
@@ -182,7 +199,7 @@ class BackendComprehensiveTests(unittest.TestCase):
                     citizen_patch = client.patch(
                         f"/reports/{rep1_id}",
                         headers=headers1,
-                        json={"status": "in_progress", "priority": "high", "priority_reason": "urgent"}
+                        json={"status": "in_progress", "note": "Work started"}
                     )
                     self.assertEqual(citizen_patch.status_code, 403)
 
@@ -199,13 +216,11 @@ class BackendComprehensiveTests(unittest.TestCase):
                     # Admin can review and update status
                     review_body = {
                         "status": "in_progress",
-                        "priority": "urgent",
-                        "priority_reason": "High traffic area near hospital",
-                        "duplicate_of": None
+                        "note": "Work started after review"
                     }
                     admin_patch = client.patch(f"/reports/{rep1_id}", headers=admin_headers, json=review_body)
                     self.assertEqual(admin_patch.status_code, 200)
-                    self.assertEqual(admin_patch.json()["priority"], "urgent")
+                    self.assertEqual(admin_patch.json()["priority"], "normal")
                     self.assertEqual(admin_patch.json()["status"], "in_progress")
 
                     # 9. Logout
@@ -227,7 +242,7 @@ class BackendComprehensiveTests(unittest.TestCase):
                         headers={"Authorization": f"Bearer {new_token}"}
                     )
                     self.assertEqual(persisted_report.status_code, 200)
-                    self.assertEqual(persisted_report.json()["priority"], "urgent")
+                    self.assertNotIn('priority',persisted_report.json())
                     self.assertEqual(persisted_report.json()["status"], "in_progress")
 
                     # Photo file persists as well

@@ -4,6 +4,7 @@ import hashlib
 import json
 import logging
 import math
+import os
 import secrets
 import time
 from typing import Literal
@@ -18,11 +19,11 @@ _PIL_OPEN = Image.open  # Capture before the model's optional-format monkeypatch
 try:
     from backend.accounts import admin_user, current_user, bearer, effective_role
     from backend.database import DATA_DIR, connect
-    from backend.grouping import fingerprints, assign_report, distance_metres, summary
+    from backend.grouping import fingerprints, summary
 except ImportError:
     from accounts import admin_user, current_user, bearer, effective_role
     from database import DATA_DIR, connect
-    from grouping import fingerprints, assign_report, distance_metres, summary
+    from grouping import fingerprints, summary
 
 router = APIRouter(prefix="/reports", tags=["Complaints"])
 logger = logging.getLogger("uvicorn.error")
@@ -33,11 +34,16 @@ MAX_MEGAPIXELS = 24_000_000
 
 def serialize(row, db=None, include_candidates=False) -> dict:
     report = dict(row)
+    if not include_candidates:
+        # Enforce the phone contract on the server, not merely by hiding UI controls.
+        visible = {key: report[key] for key in ('id','description','latitude','longitude','created_at',
+                   'issue_type','status','verification_status','verification_reason')}
+        return {**visible, 'reference': f"NS-{row['id']:08d}", 'photo_url': f"/reports/{row['id']}/photo"}
     photo_name = report.pop("photo_name", "")
     result_raw = report.pop("result_json", None)
     report["analysis"] = json.loads(result_raw) if result_raw else None
     report["photo_url"] = f"/reports/{row['id']}/photo"
-    for private_field in ("submission_key", "submission_digest", "image_sha256", "image_dhash"):
+    for private_field in ("submission_key", "submission_digest", "image_sha256", "image_dhash", 'processing_revision'):
         report.pop(private_field, None)
     if db is not None and report.get("issue_id"):
         issue = summary(db, report["issue_id"])
@@ -49,6 +55,9 @@ def serialize(row, db=None, include_candidates=False) -> dict:
                 {"issue_id": candidate["issue_id"], "reason": candidate["reason"], "issue": summary(db, candidate["issue_id"])}
                 for candidate in db.execute("SELECT * FROM duplicate_candidates WHERE report_id=?", (row["id"],))
             ]
+    if db is not None:
+        job = db.execute('SELECT state,attempts,error_code,updated_at FROM analysis_jobs WHERE report_id=?', (row['id'],)).fetchone()
+        report['processing'] = dict(job) if job else None
     return report
 
 
@@ -115,7 +124,10 @@ def submit_report(
 
     # Save photo and record in SQLite BEFORE running AI model detection
     try:
-        canonical.save(photo_path, format="PNG")
+        with photo_path.open('wb') as saved_photo:
+            canonical.save(saved_photo, format="PNG")
+            saved_photo.flush()
+            os.fsync(saved_photo.fileno())
         with connect() as db:
             db.execute("BEGIN IMMEDIATE")
             if idempotency_key:
@@ -124,45 +136,24 @@ def submit_report(
                     photo_path.unlink(missing_ok=True)
                     if previous["submission_digest"] != submission_digest:
                         raise HTTPException(409, "Submission key was already used for a different report")
-                    return serialize(previous, db)
+                    return serialize(previous, db, user['role'] == 'admin')
             cursor = db.execute(
                 """INSERT INTO reports
                 (user_id, description, latitude, longitude, photo_name, created_at, issue_type,
-                 image_sha256, image_dhash, submission_key, submission_digest)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user["id"], description, latitude, longitude, photo_name, now, issue_type, sha, dhash, idempotency_key, submission_digest)
+                 image_sha256, image_dhash, submission_key, submission_digest,image_width,image_height,analysis_status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'queued')""",
+                (user["id"], description, latitude, longitude, photo_name, now, issue_type, sha, dhash, idempotency_key, submission_digest,canonical.width,canonical.height)
             )
             report_id = cursor.lastrowid
-            assign_report(db, report_id)
+            from backend.worker_api import enqueue
+            enqueue(db, report_id)
+            saved = db.execute('SELECT * FROM reports WHERE id=?', (report_id,)).fetchone()
+            response = serialize(saved, db, user['role'] == 'admin')
     except Exception:
         photo_path.unlink(missing_ok=True)
         raise
 
-    # Model detection: run after saving, never failing the saved complaint
-    result = None
-    analysis_status = "unavailable"
-    model_ready = getattr(request.app.state, "model_ready", False)
-
-    if model_ready:
-        try:
-            try:
-                from backend.inference import detect_potholes
-            except ImportError:
-                from inference import detect_potholes
-
-            result = detect_potholes(str(photo_path))
-            analysis_status = "completed"
-        except Exception:
-            logger.exception("Analysis failed for report %s", report_id)
-            analysis_status = "failed"
-
-    with connect() as db:
-        db.execute(
-            "UPDATE reports SET analysis_status = ?, result_json = ? WHERE id = ?",
-            (analysis_status, json.dumps(result) if result is not None else None, report_id)
-        )
-        saved = db.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
-        return serialize(saved, db)
+    return response
 
 
 @router.get("")
@@ -180,12 +171,7 @@ def list_reports(
     with connect() as db:
         rows = db.execute(
             f"""SELECT * FROM reports {where}
-            ORDER BY CASE priority
-                WHEN 'urgent' THEN 0
-                WHEN 'high' THEN 1
-                WHEN 'normal' THEN 2
-                ELSE 3
-            END, created_at DESC, id DESC
+            ORDER BY created_at DESC, id DESC
             LIMIT ? OFFSET ?""",
             [*params, limit, offset]
         ).fetchall()
@@ -232,30 +218,17 @@ def get_report_photo(report_id: int, user: dict = Depends(resolve_photo_user)):
 
 
 class Review(BaseModel):
-    priority: Literal["low", "normal", "high", "urgent"]
-    priority_reason: str = Field(min_length=1, max_length=1000)
     status: Literal["open", "in_progress", "resolved", "rejected"]
-    duplicate_of: int | None = Field(default=None, gt=0)
+    note: str = Field(min_length=1, max_length=1000)
 
 
 @router.patch("/{report_id}")
 def update_report_status(report_id: int, body: Review, user: dict = Depends(admin_user)):
-    if not body.priority_reason.strip():
-        raise HTTPException(400, "Explain the priority decision")
     with connect() as db:
-        db.execute("BEGIN IMMEDIATE")
-        accessible_report(db, report_id, user)
-        if body.duplicate_of is not None:
-            raise HTTPException(400, "Use the dedicated grouping endpoint to change issue membership")
-
-        db.execute(
-            """UPDATE reports
-            SET priority = ?, priority_reason = ?, status = ?
-            WHERE id = ?""",
-            (body.priority, body.priority_reason.strip(), body.status, report_id)
-        )
-        issue_id = db.execute("SELECT issue_id FROM reports WHERE id=?", (report_id,)).fetchone()["issue_id"]
-        db.execute("UPDATE issues SET status=? WHERE id=?", (body.status, issue_id))
-        db.execute("UPDATE reports SET status=? WHERE issue_id=?", (body.status, issue_id))
-        updated = db.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
-        return serialize(updated, db, True)
+        row = accessible_report(db, report_id, user)
+        if not row['issue_id']:
+            raise HTTPException(409, 'Report has not yet been consolidated')
+        issue_id = row['issue_id']
+    from backend.issues import StatusUpdate, change_status
+    change_status(issue_id, StatusUpdate(status=body.status,note=body.note), user)
+    return get_report(report_id, user)
