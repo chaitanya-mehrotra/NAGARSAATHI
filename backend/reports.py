@@ -1,5 +1,6 @@
 """Persistent complaints with image validation, safe pre-analysis storage, and YOLO detection."""
 import io
+import hashlib
 import json
 import logging
 import math
@@ -7,7 +8,7 @@ import secrets
 import time
 from typing import Literal
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Query, Request, UploadFile
 from fastapi.responses import FileResponse
 from fastapi.security import HTTPAuthorizationCredentials
 from PIL import Image, ImageOps, UnidentifiedImageError
@@ -15,11 +16,13 @@ from pydantic import BaseModel, Field
 
 _PIL_OPEN = Image.open  # Capture before the model's optional-format monkeypatch.
 try:
-    from backend.accounts import admin_user, current_user, bearer
+    from backend.accounts import admin_user, current_user, bearer, effective_role
     from backend.database import DATA_DIR, connect
+    from backend.grouping import fingerprints, assign_report, distance_metres, summary
 except ImportError:
-    from accounts import admin_user, current_user, bearer
+    from accounts import admin_user, current_user, bearer, effective_role
     from database import DATA_DIR, connect
+    from grouping import fingerprints, assign_report, distance_metres, summary
 
 router = APIRouter(prefix="/reports", tags=["Complaints"])
 logger = logging.getLogger("uvicorn.error")
@@ -28,23 +31,30 @@ MAX_UPLOAD_BYTES = 10 * 1024 * 1024  # 10 MB max size
 MAX_MEGAPIXELS = 24_000_000
 
 
-def distance_metres(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-    """Haversine formula to calculate distance in metres between two points."""
-    a, b = math.radians(lat1), math.radians(lat2)
-    h = math.sin((b - a) / 2) ** 2 + math.cos(a) * math.cos(b) * math.sin(math.radians(lon2 - lon1) / 2) ** 2
-    return 6371000 * 2 * math.asin(math.sqrt(min(1, max(0, h))))
-
-
-def serialize(row) -> dict:
+def serialize(row, db=None, include_candidates=False) -> dict:
     report = dict(row)
     photo_name = report.pop("photo_name", "")
     result_raw = report.pop("result_json", None)
     report["analysis"] = json.loads(result_raw) if result_raw else None
     report["photo_url"] = f"/reports/{row['id']}/photo"
+    for private_field in ("submission_key", "submission_digest", "image_sha256", "image_dhash"):
+        report.pop(private_field, None)
+    if db is not None and report.get("issue_id"):
+        issue = summary(db, report["issue_id"])
+        report["issue_summary"] = issue if include_candidates else {
+            name: issue[name] for name in ("id", "report_count", "reporter_count", "unique_photo_count", "status")
+        }
+        if include_candidates:
+            report["duplicate_candidates"] = [
+                {"issue_id": candidate["issue_id"], "reason": candidate["reason"], "issue": summary(db, candidate["issue_id"])}
+                for candidate in db.execute("SELECT * FROM duplicate_candidates WHERE report_id=?", (row["id"],))
+            ]
     return report
 
 
 def accessible_report(db, report_id: int, user: dict):
+    if user["role"] == "nigam":
+        raise HTTPException(403, "Municipal accounts access consolidated issues, not individual reports")
     row = db.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
     if row is None or (user["role"] != "admin" and row["user_id"] != user["id"]):
         raise HTTPException(404, "Report not found")
@@ -59,8 +69,11 @@ def submit_report(
     longitude: float = Form(..., ge=-180, le=180),
     issue_type: str = Form("pothole"),
     image: UploadFile = File(...),
+    idempotency_key: str | None = Header(default=None, alias="Idempotency-Key", min_length=1, max_length=128),
     user: dict = Depends(current_user)
 ):
+    if user["role"] == "nigam":
+        raise HTTPException(403, "Use a citizen account to submit reports")
     description = description.strip()
     if not description or not math.isfinite(latitude) or not math.isfinite(longitude):
         raise HTTPException(400, "Enter a valid description and coordinates")
@@ -91,6 +104,8 @@ def submit_report(
         logger.warning(f"Image validation rejected upload: {e}")
         raise HTTPException(400, "Upload a valid JPEG or PNG photo")
 
+    sha, dhash = fingerprints(canonical)
+    submission_digest = hashlib.sha256(json.dumps([sha, description, latitude, longitude, issue_type]).encode()).hexdigest()
     # Create persistent storage folder
     photos_dir = DATA_DIR / "photos"
     photos_dir.mkdir(parents=True, exist_ok=True)
@@ -103,25 +118,22 @@ def submit_report(
         canonical.save(photo_path, format="PNG")
         with connect() as db:
             db.execute("BEGIN IMMEDIATE")
-            # Suggest possible nearby duplicate within 30 metres from recent open reports
-            candidates = db.execute(
-                """SELECT id, latitude, longitude FROM reports
-                WHERE duplicate_of IS NULL AND status IN ('open', 'in_progress') AND created_at >= ?
-                ORDER BY id""",
-                (now - 30 * 86400,)
-            ).fetchall()
-
-            nearby = [(distance_metres(latitude, longitude, r["latitude"], r["longitude"]), r["id"]) for r in candidates]
-            nearest = min(nearby, default=(float("inf"), None))
-            duplicate_id = nearest[1] if nearest[0] <= 30 else None
-
+            if idempotency_key:
+                previous = db.execute("SELECT * FROM reports WHERE user_id=? AND submission_key=?", (user["id"], idempotency_key)).fetchone()
+                if previous:
+                    photo_path.unlink(missing_ok=True)
+                    if previous["submission_digest"] != submission_digest:
+                        raise HTTPException(409, "Submission key was already used for a different report")
+                    return serialize(previous, db)
             cursor = db.execute(
                 """INSERT INTO reports
-                (user_id, description, latitude, longitude, photo_name, created_at, issue_type, duplicate_of)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
-                (user["id"], description, latitude, longitude, photo_name, now, issue_type, duplicate_id)
+                (user_id, description, latitude, longitude, photo_name, created_at, issue_type,
+                 image_sha256, image_dhash, submission_key, submission_digest)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                (user["id"], description, latitude, longitude, photo_name, now, issue_type, sha, dhash, idempotency_key, submission_digest)
             )
             report_id = cursor.lastrowid
+            assign_report(db, report_id)
     except Exception:
         photo_path.unlink(missing_ok=True)
         raise
@@ -150,7 +162,7 @@ def submit_report(
             (analysis_status, json.dumps(result) if result is not None else None, report_id)
         )
         saved = db.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
-        return serialize(saved)
+        return serialize(saved, db)
 
 
 @router.get("")
@@ -159,6 +171,8 @@ def list_reports(
     offset: int = 0,
     user: dict = Depends(current_user)
 ):
+    if user["role"] == "nigam":
+        raise HTTPException(403, "Use the consolidated issues endpoint")
     if not 1 <= limit <= 100 or offset < 0:
         raise HTTPException(400, "Limit must be 1–100 and offset non-negative")
 
@@ -175,13 +189,13 @@ def list_reports(
             LIMIT ? OFFSET ?""",
             [*params, limit, offset]
         ).fetchall()
-        return [serialize(row) for row in rows]
+        return [serialize(row, db, user["role"] == "admin") for row in rows]
 
 
 @router.get("/{report_id}")
 def get_report(report_id: int, user: dict = Depends(current_user)):
     with connect() as db:
-        return serialize(accessible_report(db, report_id, user))
+        return serialize(accessible_report(db, report_id, user), db, user["role"] == "admin")
 
 
 def resolve_photo_user(
@@ -202,9 +216,9 @@ def resolve_photo_user(
             WHERE s.token_hash = ? AND s.expires_at > ?""",
             (token_hash(tok), int(time.time()))
         ).fetchone()
-    if row is None:
-        raise HTTPException(401, "Login required or session expired")
-    return dict(row)
+        if row is None:
+            raise HTTPException(401, "Login required or session expired")
+        return {**dict(row), "role": effective_role(db, row)}
 
 
 @router.get("/{report_id}/photo")
@@ -232,16 +246,16 @@ def update_report_status(report_id: int, body: Review, user: dict = Depends(admi
         db.execute("BEGIN IMMEDIATE")
         accessible_report(db, report_id, user)
         if body.duplicate_of is not None:
-            target = db.execute("SELECT * FROM reports WHERE id=?", (body.duplicate_of,)).fetchone()
-            children = db.execute("SELECT 1 FROM reports WHERE duplicate_of=? LIMIT 1", (report_id,)).fetchone()
-            if target is None or body.duplicate_of == report_id or target["duplicate_of"] is not None or children:
-                raise HTTPException(400, "Choose a root report; duplicate chains and cycles are not allowed")
+            raise HTTPException(400, "Use the dedicated grouping endpoint to change issue membership")
 
         db.execute(
             """UPDATE reports
-            SET priority = ?, priority_reason = ?, status = ?, duplicate_of = ?
+            SET priority = ?, priority_reason = ?, status = ?
             WHERE id = ?""",
-            (body.priority, body.priority_reason.strip(), body.status, body.duplicate_of, report_id)
+            (body.priority, body.priority_reason.strip(), body.status, report_id)
         )
+        issue_id = db.execute("SELECT issue_id FROM reports WHERE id=?", (report_id,)).fetchone()["issue_id"]
+        db.execute("UPDATE issues SET status=? WHERE id=?", (body.status, issue_id))
+        db.execute("UPDATE reports SET status=? WHERE issue_id=?", (body.status, issue_id))
         updated = db.execute("SELECT * FROM reports WHERE id = ?", (report_id,)).fetchone()
-        return serialize(updated)
+        return serialize(updated, db, True)

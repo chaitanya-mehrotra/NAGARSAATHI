@@ -145,7 +145,9 @@ export async function submit(form) {
   body.append("longitude", String(form.longitude));
   body.append("issue_type", String(form.issue_type || "pothole"));
 
-  return request("/reports", { method: "POST", body });
+  return request("/reports", { method: "POST", body,
+    headers: form.submissionKey ? { "Idempotency-Key": form.submissionKey } : {},
+  });
 }
 
 export async function updateReport(id, reviewData) {

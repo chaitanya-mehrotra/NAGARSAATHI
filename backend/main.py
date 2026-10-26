@@ -24,10 +24,12 @@ try:
     from backend.accounts import current_user, router as accounts_router
     from backend.database import connect, init_db
     from backend.reports import router as reports_router
+    from backend.issues import router as issues_router
 except ImportError:
     from accounts import current_user, router as accounts_router
     from database import connect, init_db
     from reports import router as reports_router
+    from issues import router as issues_router
 
 
 @asynccontextmanager
@@ -76,6 +78,7 @@ app.add_middleware(
 
 app.include_router(accounts_router)
 app.include_router(reports_router)
+app.include_router(issues_router)
 
 
 def error_response(status_code: int, code: str, message: str):
@@ -103,18 +106,23 @@ def health():
 
 
 @app.get("/metrics")
-def metrics():
+def metrics(user: dict = Depends(current_user)):
     with connect() as db:
-        total = db.execute("SELECT COUNT(*) AS c FROM reports").fetchone()["c"]
-        pothole = db.execute("SELECT COUNT(*) AS c FROM reports WHERE issue_type IN ('pothole', 'both')").fetchone()["c"]
-        waterlogging = db.execute("SELECT COUNT(*) AS c FROM reports WHERE issue_type IN ('waterlogging', 'both')").fetchone()["c"]
-        resolved = db.execute("SELECT COUNT(*) AS c FROM reports WHERE status = 'resolved'").fetchone()["c"]
-    return {
-        "total": total,
-        "pothole": pothole,
-        "waterlogging": waterlogging,
-        "resolved": resolved,
-    }
+        if user["role"] == "nigam":
+            table, where, params, unit = "issues", "WHERE published=1", [], "issues"
+        else:
+            table, where, params, unit = "reports", "", [], "reports"
+            if user["role"] != "admin":
+                where, params = "WHERE user_id=?", [user["id"]]
+        rows = db.execute(f"SELECT * FROM {table} {where}", params).fetchall()
+        issue_count = len(rows) if unit == "issues" else len({r["issue_id"] for r in rows})
+        status_counts = {name: sum(r["status"] == name for r in rows)
+                         for name in ("open", "in_progress", "resolved", "rejected", "submitted", "under_review")}
+        return {
+            "total": len(rows), "pothole": sum(r["issue_type"] in ("pothole", "both") for r in rows),
+            "waterlogging": sum(r["issue_type"] in ("waterlogging", "both") for r in rows),
+            **status_counts, "unit": unit, "issue_count": issue_count,
+        }
 
 
 @app.get("/ready")
@@ -139,6 +147,8 @@ def list_complaints_alias(
     mine: bool = False,
     user: dict = Depends(current_user)
 ):
+    if user["role"] == "nigam":
+        raise HTTPException(403, "Use the consolidated issues endpoint")
     where_parts = []
     params = []
     if mine or user["role"] != "admin":
@@ -172,7 +182,8 @@ def list_complaints_alias(
     except ImportError:
         from reports import serialize
 
-    return {"items": [serialize(r) for r in rows], "total": total_count}
+    with connect() as db:
+        return {"items": [serialize(r, db, user["role"] == "admin") for r in rows], "total": total_count}
 
 
 @app.get("/complaints/{complaint_id}")

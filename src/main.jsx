@@ -30,6 +30,7 @@ import {
   LoaderCircle,
 } from "lucide-react";
 import ComplaintMap from "./Map";
+import { IssueCounts, GroupingControls } from "./Grouping";
 import {
   configured,
   identity,
@@ -90,6 +91,7 @@ function App() {
     [offset, setOffset] = useState(0),
     [setup, setSetup] = useState(false);
   const [user, setUser] = useState(getStoredUser);
+  const isNigam = user?.role === "nigam";
   const [authModal, setAuthModal] = useState(false);
   const [authTab, setAuthTab] = useState("login");
   const [authForm, setAuthForm] = useState({ name: "", email: "", password: "" });
@@ -123,7 +125,7 @@ function App() {
     setMobile(false);
     setOffset(0);
   };
-  const report = () => changePage("Report Issue");
+  const report = () => changePage(isNigam ? "Overview" : "Report Issue");
   function notify(t) {
     setToast(t);
     setTimeout(() => setToast(""), 4000);
@@ -136,6 +138,8 @@ function App() {
     try {
       const res = await login(authForm.email, authForm.password);
       setUser(res.user);
+      setDetail(null); setRows([]); setMetrics(null);
+      if (res.user.role === "nigam") changePage("Overview");
       setAuthModal(false);
       notify(`Signed in as ${res.user.name}`);
       reload();
@@ -167,6 +171,7 @@ function App() {
   async function handleLogout() {
     await logout();
     setUser(null);
+    setRows([]); setMetrics(null); setTotal(null); setDetail(null);
     notify("Signed out");
     reload();
   }
@@ -236,7 +241,7 @@ function App() {
     });
     const timer = setTimeout(
       () =>
-        Promise.all([request("/complaints?" + params), request("/metrics")])
+        Promise.all([request((isNigam ? "/issues?" : "/complaints?") + params), request("/metrics")])
           .then(([data, m]) => {
             if (active) {
               setRows(data.items || []);
@@ -257,9 +262,9 @@ function App() {
     };
   }, [search, issue, status, date, until, sort, page, offset, refresh, user]);
   useEffect(() => {
-    const id = location.hash.match(/^#\/complaints\/([0-9a-zA-Z-]+)$/)?.[1];
+    const id = location.hash.match(/^#\/(?:complaints|issues)\/([0-9a-zA-Z-]+)$/)?.[1];
     if (id && configured && user)
-      request("/complaints/" + id)
+      request((isNigam ? "/issues/" : "/complaints/") + id)
         .then(setDetail)
         .catch((e) => setError(e.message));
   }, [refresh, user]);
@@ -297,7 +302,7 @@ function App() {
   }, [detail, setup]);
   function openDetails(r) {
     setDetail(r);
-    history.replaceState(null, "", "#/complaints/" + r.id);
+    history.replaceState(null, "", (isNigam ? "#/issues/" : "#/complaints/") + r.id);
   }
   function close() {
     setDetail(null);
@@ -366,6 +371,7 @@ function App() {
     try {
       const r = await submit({
         ...form,
+        submissionKey: key.current,
         description: form.description.trim(),
       });
       setSuccess(r);
@@ -395,15 +401,15 @@ function App() {
   };
   const icons = [FileText, Construction, Droplets, CheckCheck];
   const cards = [
-    ["Total complaints", "total", "All reported issues", ""],
-    ["Pothole reports", "pothole", "Road surface issues", "pothole"],
+    [isNigam ? "Consolidated issues" : "Total reports", "total", isNigam ? "One entry per shared issue" : "Individual submissions", ""],
+    [isNigam ? "Pothole issues" : "Pothole reports", "pothole", "Road surface issues", "pothole"],
     [
-      "Waterlogging reports",
+      isNigam ? "Waterlogging issues" : "Waterlogging reports",
       "waterlogging",
       "Drainage & flooding",
       "waterlogging",
     ],
-    ["Resolved complaints", "resolved", "Issues taken care of", "resolved"],
+    [isNigam ? "Resolved issues" : "Resolved reports", "resolved", "Issues taken care of", "resolved"],
   ];
   return (
     <div className="app">
@@ -424,10 +430,10 @@ function App() {
           </span>
         </a>
         <div className="workspace-label" style={user?.role === "admin" ? { color: "#d97706", fontWeight: 700 } : undefined}>
-          {user?.role === "admin" ? "ADMINISTRATOR WORKSPACE" : "CITIZEN WORKSPACE"}
+          {user?.role === "admin" ? "PLATFORM ADMIN WORKSPACE" : isNigam ? "NAGAR NIGAM WORKSPACE" : "CITIZEN WORKSPACE"}
         </div>
         <nav>
-          {nav.map(([p, Icon]) => (
+          {nav.filter(([p]) => !isNigam || !["Report Issue", "My Reports"].includes(p)).map(([p, Icon]) => (
             <button
               key={p}
               className={"nav-item " + (page === p ? "active" : "")}
@@ -454,7 +460,7 @@ function App() {
               forward.
             </p>
             <button onClick={report}>
-              Make a difference <ArrowRight size={15} />
+              {isNigam ? "View consolidated issues" : "Make a difference"} <ArrowRight size={15} />
             </button>
           </div>
           <div
@@ -473,7 +479,7 @@ function App() {
                 {user ? user.name : "Sign In / Register"}
               </div>
               <small style={{ display: "block" }}>
-                {user ? (user.role === "admin" ? "Administrator" : "Citizen account") : "Click to authenticate"}
+                {user ? (user.role === "admin" ? "Platform administrator" : isNigam ? "Nagar Nigam officer" : "Citizen account") : "Click to authenticate"}
               </small>
             </div>
             {user ? (
@@ -560,10 +566,10 @@ function App() {
                 Sign In
               </button>
             )}
-            <button className="primary" onClick={report}>
+            {!isNigam && <button className="primary" onClick={report}>
               <Plus size={17} />
               Report Issue
-            </button>
+            </button>}
           </div>
         </header>
         <main>
@@ -623,12 +629,7 @@ function App() {
                     </div>
                   )}
 
-                  {success.duplicate_of && (
-                    <div className="privacy-note" style={{ margin: "16px auto", maxWidth: "480px" }}>
-                      <Info size={18} />
-                      <span>Nearby possible duplicate report identified (Report #{success.duplicate_of}). Administrator will review both.</span>
-                    </div>
-                  )}
+                  <IssueCounts issue={success.issue_summary} />
 
                   <div className="button-row" style={{ marginTop: "24px" }}>
                     <button
@@ -1175,8 +1176,8 @@ function App() {
               {page === "My Reports" && (
                 <div className="session-notice">
                   <Info size={17} />
-                  Reports belong to your anonymous browser session. Clearing it
-                  may remove access; there is no cross-device recovery.
+                  Reports belong to your account. Sign in with the same account
+                  on another device to track them.
                 </div>
               )}
               <section className="card workspace">
@@ -1187,14 +1188,14 @@ function App() {
                         <Map size={19} />
                       </span>
                       <h2>
-                        {page === "My Reports"
+                        {isNigam ? "Consolidated issues" : page === "My Reports"
                           ? "My reports"
                           : "Neighbourhood reports"}
                       </h2>
                       <span className="outline-badge">
                         {total === null
                           ? user ? "Loading" : "Sign in required"
-                          : total + " complaints"}
+                          : total + (isNigam ? " issues" : " reports")}
                       </span>
                     </div>
                     <p>
@@ -1204,7 +1205,7 @@ function App() {
                           rows.length +
                           " of " +
                           total +
-                          " matching complaints"}
+                          (isNigam ? " matching issues" : " matching reports")}
                     </p>
                   </div>
                   <button
@@ -1372,10 +1373,13 @@ function App() {
                               {issueLabels[r.issue_type]}
                             </span>
                             <small>
-                              {new Date(r.created_at).toLocaleDateString()}
+                              {new Date(typeof r.created_at === "number" ? r.created_at * 1000 : r.created_at).toLocaleDateString()}
                             </small>
                           </div>
                           <h4>{r.description}</h4>
+                          <small>{isNigam
+                            ? `Issue #${r.id} · ${r.report_count} reports from ${r.reporter_count} distinct accounts`
+                            : `Report #${r.id} · Issue #${r.issue_id ?? "pending"}${r.issue_summary ? ` · ${r.issue_summary.report_count} linked reports` : ""}`}</small>
                           <span className="reference">{r.reference}</span>
                           <div className="complaint-row-bottom">
                             <span className={"status " + r.status}>
@@ -1491,12 +1495,12 @@ function App() {
                       <span className="eyebrow">
                         A LITTLE ACTION GOES A LONG WAY
                       </span>
-                      <h3>Spotted an issue on your street?</h3>
+                      <h3>{isNigam ? "One work item, all supporting reports" : "Spotted an issue on your street?"}</h3>
                       <p>
-                        Help put it on the map. It only takes a few minutes.
+                        {isNigam ? "Counts update as the platform admin links new reports to an existing issue." : "Help put it on the map. It only takes a few minutes."}
                       </p>
                       <button className="text-button" onClick={report}>
-                        Create a report <ArrowRight size={16} />
+                        {isNigam ? "View issues" : "Create a report"} <ArrowRight size={16} />
                       </button>
                     </div>
                   </section>
@@ -1591,7 +1595,9 @@ function App() {
             ) : (
               <>
                 <div className="eyebrow">COMPLAINT DETAILS</div>
-                <h2 id="dialog-title">{detail.reference || `Report #${detail.id}`}</h2>
+                <h2 id="dialog-title">{detail.reference || `${isNigam ? "Issue" : "Report"} #${detail.id}`}</h2>
+                <IssueCounts issue={isNigam ? detail : detail.issue_summary} />
+                {user?.role === "admin" && <GroupingControls key={detail.id} report={detail} onChanged={updated => { setDetail(updated); reload(); }} />}
                 <div className="button-row">
                   <span className={"badge " + detail.issue_type}>
                     {issueLabels[detail.issue_type] || "Issue"}
@@ -1619,10 +1625,10 @@ function App() {
                   {detail.latitude?.toFixed(6)}, {detail.longitude?.toFixed(6)}
                 </p>
                 {detail.landmark && <p>{detail.landmark}</p>}
-                {detail.duplicate_of && (
+                {detail.duplicate_of && user?.role === "admin" && (
                   <div className="privacy-note" style={{ margin: "10px 0" }}>
                     <Info size={16} />
-                    <span>Advisory link: Possible duplicate of Report #{detail.duplicate_of}</span>
+                    <span>Grouped using the identical photo near Report #{detail.duplicate_of}. Admin can separate the report if needed.</span>
                   </div>
                 )}
                 <dl>
@@ -1641,7 +1647,7 @@ function App() {
                     </>
                   )}
                 </dl>
-                {detail.analysis ? (
+                {isNigam ? <p className="muted">Consolidated issue. Individual citizen reports remain with the NAGARSAATHI platform administrator.</p> : detail.analysis ? (
                   <div className="ai-panel">
                     <strong>YOLO11n Detection Findings</strong>
                     <p>

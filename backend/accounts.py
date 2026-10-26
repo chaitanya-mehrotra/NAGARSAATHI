@@ -70,14 +70,16 @@ def create_user(name: str, email: str, password: str, role: str = "citizen"):
         raise HTTPException(400, "Name cannot be blank")
     email = normalize_email(email)
     # Public registration MUST always create a citizen account
-    if role not in ("citizen", "admin"):
+    if role not in ("citizen", "admin", "nigam"):
         role = "citizen"
     with connect() as db:
         try:
             cursor = db.execute(
                 "INSERT INTO users(name, email, password_hash, role) VALUES(?,?,?,?)",
-                (name, email, hash_password(password), role)
+                (name, email, hash_password(password), "citizen" if role == "nigam" else role)
             )
+            if role == "nigam":
+                db.execute("INSERT INTO municipal_accounts(user_id) VALUES(?)", (cursor.lastrowid,))
         except sqlite3.IntegrityError:
             raise HTTPException(409, "Email is already registered")
     return {"id": cursor.lastrowid, "name": name, "email": email, "role": role}
@@ -104,6 +106,7 @@ def login(body: Login):
         # Clean expired sessions
         db.execute("DELETE FROM sessions WHERE expires_at <= ?", (int(time.time()),))
         db.execute("INSERT INTO sessions VALUES(?,?,?)", (token_hash(token), user["id"], expires))
+        role = effective_role(db, user)
 
     return {
         "access_token": token,
@@ -113,9 +116,15 @@ def login(body: Login):
             "id": user["id"],
             "name": user["name"],
             "email": user["email"],
-            "role": user["role"]
+            "role": role
         }
     }
+
+
+def effective_role(db, user):
+    if user["role"] == "admin":
+        return "admin"
+    return "nigam" if db.execute("SELECT 1 FROM municipal_accounts WHERE user_id=?", (user["id"],)).fetchone() else "citizen"
 
 
 def current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
@@ -128,9 +137,9 @@ def current_user(credentials: HTTPAuthorizationCredentials = Depends(bearer)):
             WHERE s.token_hash = ? AND s.expires_at > ?""",
             (token_hash(credentials.credentials), int(time.time()))
         ).fetchone()
-    if row is None:
-        raise HTTPException(401, "Login required or session expired")
-    return dict(row)
+        if row is None:
+            raise HTTPException(401, "Login required or session expired")
+        return {**dict(row), "role": effective_role(db, row)}
 
 
 def admin_user(user=Depends(current_user)):
@@ -155,10 +164,11 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create a local NAGARSAATHI administrator")
     parser.add_argument("email", help="Administrator email address")
     parser.add_argument("--name", default="Administrator", help="Administrator name")
+    parser.add_argument("--role", choices=["admin", "nigam"], default="admin", help="Platform admin or municipal consolidated-issue account")
     args = parser.parse_args()
     init_db()
     password = getpass.getpass("Admin password (10–128 characters): ")
     if not 10 <= len(password) <= 128:
         parser.error("Password must contain 10–128 characters")
-    admin = create_user(args.name, args.email, password, role="admin")
-    print(f"Administrator successfully created: {admin['email']} (ID: {admin['id']})")
+    admin = create_user(args.name, args.email, password, role=args.role)
+    print(f"{args.role} account successfully created: {admin['email']} (ID: {admin['id']})")

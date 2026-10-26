@@ -1,7 +1,8 @@
 """SQLite database initialization and connection management."""
 import os
 import sqlite3
-from contextlib import contextmanager
+import time
+from contextlib import contextmanager, closing
 from pathlib import Path
 
 # Persistent path: works regardless of terminal's current working directory
@@ -23,6 +24,12 @@ def connect():
 
 def init_db():
     with connect() as db:
+        existing_columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
+        if existing_columns and "issue_id" not in existing_columns:
+            backups = DATA_DIR / "backups"
+            backups.mkdir(exist_ok=True)
+            with closing(sqlite3.connect(backups / f"before-issue-grouping-{time.time_ns()}.db")) as backup:
+                db.backup(backup)
         db.executescript("""
         CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY,
@@ -53,4 +60,68 @@ def init_db():
             duplicate_of INTEGER REFERENCES reports(id)
         );
         CREATE INDEX IF NOT EXISTS reports_recent ON reports(created_at, status);
+        CREATE TABLE IF NOT EXISTS municipal_accounts (
+            user_id INTEGER PRIMARY KEY REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS issues (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            representative_report_id INTEGER NOT NULL REFERENCES reports(id),
+            issue_type TEXT NOT NULL,
+            latitude REAL NOT NULL,
+            longitude REAL NOT NULL,
+            created_at INTEGER NOT NULL,
+            status TEXT NOT NULL DEFAULT 'open',
+            published INTEGER NOT NULL DEFAULT 0 CHECK(published IN (0,1))
+        );
+        CREATE TABLE IF NOT EXISTS duplicate_candidates (
+            report_id INTEGER NOT NULL REFERENCES reports(id),
+            issue_id INTEGER NOT NULL REFERENCES issues(id),
+            reason TEXT NOT NULL,
+            PRIMARY KEY(report_id, issue_id)
+        );
+        CREATE TABLE IF NOT EXISTS grouping_history (
+            id INTEGER PRIMARY KEY,
+            report_id INTEGER NOT NULL REFERENCES reports(id),
+            from_issue INTEGER,
+            to_issue INTEGER NOT NULL,
+            actor_id INTEGER NOT NULL REFERENCES users(id),
+            reason TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
         """)
+        # Additive migration: preserve all existing accounts, reports and photos.
+        columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
+        for name, declaration in {
+            "issue_id": "INTEGER REFERENCES issues(id)",
+            "image_sha256": "TEXT",
+            "image_dhash": "TEXT",
+            "submission_key": "TEXT",
+            "submission_digest": "TEXT",
+            "grouping_reason": "TEXT NOT NULL DEFAULT 'legacy_needs_review'",
+        }.items():
+            if name not in columns:
+                db.execute(f"ALTER TABLE reports ADD COLUMN {name} {declaration}")
+        db.execute("CREATE INDEX IF NOT EXISTS report_issue ON reports(issue_id)")
+        db.execute("CREATE UNIQUE INDEX IF NOT EXISTS report_submission ON reports(user_id, submission_key) WHERE submission_key IS NOT NULL")
+        try:
+            from backend.grouping import new_issue, fingerprints
+        except ImportError:
+            from grouping import new_issue, fingerprints
+        from PIL import Image, ImageOps
+        historical_links = []
+        for report in db.execute("SELECT * FROM reports WHERE issue_id IS NULL ORDER BY id").fetchall():
+            if report["duplicate_of"] is not None:
+                historical_links.append((report["id"], report["duplicate_of"]))
+            issue_id = new_issue(db, report)
+            # The old distance-only duplicate links are suggestions, never confirmed groups.
+            db.execute("UPDATE reports SET issue_id=?, duplicate_of=NULL WHERE id=?", (issue_id, report["id"]))
+            try:
+                with Image.open(DATA_DIR / 'photos' / report['photo_name'], formats=['PNG', 'JPEG', 'WEBP']) as image:
+                    sha, dhash = fingerprints(ImageOps.exif_transpose(image))
+                db.execute("UPDATE reports SET image_sha256=?, image_dhash=? WHERE id=?", (sha, dhash, report["id"]))
+            except (OSError, ValueError):
+                pass  # Missing historical photos must not prevent startup or discard reports.
+        for report_id, previous_root in historical_links:
+            target = db.execute("SELECT issue_id FROM reports WHERE id=?", (previous_root,)).fetchone()
+            if target:
+                db.execute("INSERT OR IGNORE INTO duplicate_candidates VALUES(?,?,?)", (report_id, target["issue_id"], "legacy_distance_only"))

@@ -4,6 +4,10 @@ This is the latest `chaitanya's-UI` interface with the combined YOLO11n pothole/
 
 The current application uses React/Leaflet, FastAPI, SQLite, local citizen/admin accounts and private photo storage. It does not use the earlier TypeScript/PostGIS demo, its background worker, or synthetic demo accounts. The older Supabase migration is retained only as historical source.
 
+Duplicate grouping and report/reporter counts are documented in [DUPLICATE_GROUPING.md](DUPLICATE_GROUPING.md). Platform admins retain every individual submission; separately provisioned Nagar Nigam accounts see only forwarded consolidated issues. Priority scoring is deferred.
+
+For step-by-step startup, account creation, report checking and expected outputs, read [RUN_AND_TEST_PROJECT.md](RUN_AND_TEST_PROJECT.md).
+
 ## Run the complete application
 
 With Docker Desktop running, execute from this folder:
