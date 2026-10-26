@@ -181,3 +181,29 @@ server-verified role and session expiry. Mobile/desktop no horizontal overflow c
 Before joint acceptance, run against Person 1's real API with worker stopped/started,
 real staff accounts, server-filtered photos/records, duplicate deliveries and actual
 repair propagation. The frontend fixtures are not a replacement for these checks.
+
+
+## Chaitanya UI restoration
+
+The initial role implementation opened with a standalone sign-in screen. Per the
+user's correction, the original overview is now the landing screen: four metric
+cards, map/recent-complaint split, filters, mobile map/list switch, progress card and
+community callout, using Chaitanya's existing CSS. Citizen navigation restores
+Overview / Report Issue / Complaint Map / My Reports. Sign-in/register open in the
+existing drawer pattern; no private requests run while signed out.
+
+CityOverview.jsx uses server totals from GET /complaints?limit=1 with mine=true for
+citizens and optional issue/status filters for the summary cards. Existing baseline
+search/issue/status query filtering must be preserved by Person 1. It never computes
+counts from the loaded page and never calls the baseline unauthenticated /metrics.
+Admin overview uses the admin-scoped inbox; Nigam remains on consolidated issues.
+Map coordinate validation prevents malformed coordinates crashing the map without
+removing records from the list. Guest totals remain unavailable rather than zero.
+
+The preview server was restarted with CHOKIDAR_USEPOLLING=true because Windows had
+retained a stale transform after file edits. This is a local process setting, not a
+change to shared build configuration. If edits are not reflected, restart Vite.
+
+Final checks after restoration: 9 frontend checks and 8 browser scenarios passed;
+production build and diff whitespace check passed. The extra browser scenario checks
+the original guest dashboard, zero private requests, sign-in drawer and 360px layout.

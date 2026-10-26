@@ -19,3 +19,9 @@ Final validation: 9 Node frontend checks passed, 7 fixture-backed Edge browser
 scenarios passed (including 360px layouts and polling), production Vite build passed,
 and git diff --check passed. Mobile screenshot inspected. Live Person 1 API/worker
 integration remains pending; no backend security or automation claim is made.
+
+
+Design correction: restored Chaitanya's original dashboard/metric cards/map-list,
+progress/community cards, citizen navigation and sign-in drawer. No private API
+requests before sign-in. Added guest-dashboard browser coverage; final totals are
+9 frontend checks and 8 browser scenarios, plus a successful production build.

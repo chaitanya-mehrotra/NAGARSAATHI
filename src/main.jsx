@@ -1,11 +1,12 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { MapPin, LayoutDashboard, Plus, FileText, ShieldCheck, Menu, ChevronRight, AlertCircle } from 'lucide-react';
+import { MapPin, LayoutDashboard, Plus, FileText, ShieldCheck, Menu, ChevronRight, AlertCircle, Map as MapIcon } from 'lucide-react';
 import { getStoredToken, identity, observeSessions, login, register, logout, request } from './services';
 import { roleLabels, routeFromHash, roleCanOpen, locationLabel } from './workflows';
 import { CitizenSubmit, CitizenReports, TrackingStatus } from './Citizen';
 import { AdminInbox, IssueList, IssueDetail, Counts, Priority, ExceptionReview } from './Staff';
 import { Modal, Notice, Photo, useRemote } from './ui';
+import CityOverview from './CityOverview';
 import './style.css';
 import './workflows.css';
 
@@ -31,7 +32,7 @@ function App() {
     return () => { active = false; generation++; controller?.abort(); stop(); };
   }, [attempt]);
   if (session.checking) return <div className="workflow-gate"><div className="brand"><MapPin /> NAGARSAATHI</div><p role="status">Checking your session…</p></div>;
-  if (!session.user) return <Auth error={session.error} retry={() => setAttempt(x => x + 1)} />;
+  if (!session.user) return <Workspace key={session.generation} user={null} authError={session.error} retrySession={() => setAttempt(x => x + 1)} />;
   return <Workspace key={session.generation} user={session.user} />;
 }
 function Auth({ error: sessionError, retry }) {
@@ -60,27 +61,33 @@ function Auth({ error: sessionError, retry }) {
   </section></main>;
 }
 const navigation = {
-  citizen: [['My Reports', FileText], ['Report Issue', Plus]],
-  admin: [['All submissions', LayoutDashboard], ['Exceptions', AlertCircle], ['Shared issues', FileText]],
+  citizen: [['Overview', LayoutDashboard], ['Report Issue', Plus], ['Complaint Map', MapIcon], ['My Reports', FileText]],
+  admin: [['All submissions', LayoutDashboard], ['Overview', MapIcon], ['Exceptions', AlertCircle], ['Shared issues', FileText]],
   nigam: [['Published issues', LayoutDashboard]],
 };
-function Workspace({ user }) {
-  const [page, setPage] = useState(navigation[user.role][0][0]), [mobile, setMobile] = useState(false), [route, setRoute] = useState(() => routeFromHash(location.hash));
+function Workspace({ user, authError = '', retrySession }) {
+  const role = user?.role || 'citizen';
+  const [authOpen, setAuthOpen] = useState(!!authError);
+  const closeAuth = useCallback(() => setAuthOpen(false), []);
+  const [page, setPage] = useState(navigation[role][0][0]), [mobile, setMobile] = useState(false), [route, setRoute] = useState(() => routeFromHash(location.hash));
   useEffect(() => { const changed = () => setRoute(routeFromHash(location.hash)); window.addEventListener('hashchange', changed); return () => window.removeEventListener('hashchange', changed); }, []);
   const close = useCallback(() => { history.replaceState(null, '', location.pathname + location.search); setRoute(null); }, []);
   function open(kind, id) { location.hash = `/${kind}/${id}`; setRoute({ kind, id: String(id) }); }
   const openReport = id => open('reports', id), openIssue = id => open('issues', id);
-  return <div className="app"><aside className={'sidebar ' + (mobile ? 'open' : '')}><a href="#" className="brand" onClick={e => { e.preventDefault(); close(); setPage(navigation[user.role][0][0]); }}><span className="brand-symbol"><MapPin size={24} /></span><span>NAGARSAATHI<small>YOUR CITY. OUR RESPONSIBILITY.</small></span></a>
-    <div className="workspace-label">{roleLabels[user.role].toUpperCase()}</div><nav aria-label="Workspace navigation">{navigation[user.role].map(([label, Icon]) => <button className={'nav-item ' + (page === label ? 'active' : '')} key={label} onClick={() => { setPage(label); setMobile(false); close(); }}><Icon size={19} />{label}{page === label && <span className="active-dot" />}</button>)}</nav>
-    <div className="sidebar-bottom"><div className="together"><span className="mini-icon"><ShieldCheck /></span><h3>Small reports.<br />Better neighbourhoods.</h3><p>Stay connected from the first report to the final repair.</p></div><div className="session"><span className="avatar">{user.name?.[0]?.toUpperCase() || 'N'}</span><div><strong>{user.name}</strong><small>{roleLabels[user.role]}</small></div></div></div></aside>
-    <div className="main"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Toggle navigation" aria-expanded={mobile} onClick={() => setMobile(!mobile)}><Menu /></button><div className="breadcrumb">Workspace <ChevronRight size={14} /><strong>{page}</strong></div><div className="top-actions"><button className="secondary" onClick={logout}>Sign out</button></div></header>
-      <main><div className="page-heading"><div className="eyebrow">{roleLabels[user.role].toUpperCase()}</div><h1>{page === 'My Reports' ? 'Your voice. A better city.' : page === 'Report Issue' ? 'Report an issue' : page}</h1><p>{user.role === 'citizen' ? 'A photo, a pin, and a few details can make a difference.' : 'Clear evidence. Shared action. Visible progress.'}</p></div>
-        {user.role === 'citizen' && (page === 'Report Issue' ? <CitizenSubmit openReport={openReport} /> : <CitizenReports openReport={openReport} />)}
-        {user.role === 'admin' && (page === 'Shared issues' ? <IssueList role="admin" openIssue={openIssue} /> : <AdminInbox key={page} exceptions={page === 'Exceptions'} openReport={openReport} openIssue={openIssue} />)}
-        {user.role === 'nigam' && <IssueList role="nigam" openIssue={openIssue} />}
+  return <div className="app"><aside className={'sidebar ' + (mobile ? 'open' : '')}><a href="#" className="brand" onClick={e => { e.preventDefault(); close(); setPage(navigation[role][0][0]); }}><span className="brand-symbol"><MapPin size={24} /></span><span>NAGARSAATHI<small>YOUR CITY. OUR RESPONSIBILITY.</small></span></a>
+    <div className="workspace-label">{roleLabels[role].toUpperCase()}</div><nav aria-label="Workspace navigation">{navigation[role].map(([label, Icon]) => <button className={'nav-item ' + (page === label ? 'active' : '')} key={label} onClick={() => { if (!user && label !== 'Overview' && label !== 'Complaint Map') { setAuthOpen(true); setMobile(false); return; } setPage(label); setMobile(false); close(); }}><Icon size={19} />{label}{page === label && <span className="active-dot" />}</button>)}</nav>
+    <div className="sidebar-bottom"><div className="together"><span className="mini-icon"><ShieldCheck /></span><h3>Small reports.<br />Better neighbourhoods.</h3><p>Stay connected from the first report to the final repair.</p></div><div className="session"><span className="avatar">{user?.name?.[0]?.toUpperCase() || 'N'}</span><div><strong>{user?.name || 'Your citizen account'}</strong><small>{roleLabels[role]}</small></div></div></div></aside>
+    <div className="main"><header className="topbar"><button className="mobile-menu icon-button" aria-label="Toggle navigation" aria-expanded={mobile} onClick={() => setMobile(!mobile)}><Menu /></button><div className="breadcrumb">Workspace <ChevronRight size={14} /><strong>{page}</strong></div><div className="top-actions">{user ? <button className="secondary" onClick={logout}>Sign out</button> : <button className="secondary" onClick={() => setAuthOpen(true)}>Sign in</button>}{role === 'citizen' && <button className="primary" onClick={() => user ? setPage('Report Issue') : setAuthOpen(true)}><Plus size={17} />Report Issue</button>}</div></header>
+      <main><div className="page-heading"><div className="eyebrow">{roleLabels[role].toUpperCase()}</div><h1>{page === 'Overview' ? 'Your city, at a glance.' : page === 'Complaint Map' ? 'Every report. On the map.' : page === 'My Reports' ? 'Your voice. A better city.' : page === 'Report Issue' ? 'Report an issue' : page}</h1><p>{role === 'citizen' ? 'A photo, a pin, and a few details can make a difference.' : 'Clear evidence. Shared action. Visible progress.'}</p></div>
+        {(page === 'Overview' || page === 'Complaint Map') && <CityOverview key={page} user={user} mapOnly={page === 'Complaint Map'} openReport={openReport} report={() => setPage(role === 'admin' ? 'All submissions' : 'Report Issue')} signIn={() => setAuthOpen(true)} />}
+        {role === 'citizen' && page === 'Report Issue' && user && <CitizenSubmit openReport={openReport} />}
+        {role === 'citizen' && page === 'My Reports' && user && <CitizenReports openReport={openReport} />}
+        {role === 'admin' && page !== 'Overview' && (page === 'Shared issues' ? <IssueList role="admin" openIssue={openIssue} /> : <AdminInbox key={page} exceptions={page === 'Exceptions'} openReport={openReport} openIssue={openIssue} />)}
+        {role === 'nigam' && <IssueList role="nigam" openIssue={openIssue} />}
       </main><footer className="workflow-footer">NAGARSAATHI · Your city. Our responsibility.</footer></div>
-    {route && <Modal title={`${route.kind === 'issues' ? 'Issue' : 'Report'} #${route.id}`} close={close}>
-      {!roleCanOpen(user.role, route) ? <p role="alert">This record is not available in your workspace.</p> : route.kind === 'issues' ? <IssueDetail id={route.id} role={user.role} /> : <ReportDetail id={route.id} role={user.role} openIssue={openIssue} />}
+    {authOpen && <Modal title="Sign in to NAGARSAATHI" close={closeAuth}><Auth error={authError} retry={retrySession || (() => {})} /></Modal>}
+    {route && user && <Modal title={`${route.kind === 'issues' ? 'Issue' : 'Report'} #${route.id}`} close={close}>
+      {!roleCanOpen(role, route) ? <p role="alert">This record is not available in your workspace.</p> : route.kind === 'issues' ? <IssueDetail id={route.id} role={role} /> : <ReportDetail id={route.id} role={role} openIssue={openIssue} />}
     </Modal>}
   </div>;
 }

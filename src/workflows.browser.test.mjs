@@ -17,7 +17,7 @@ async function setup(role = 'citizen', mobile = false) {
   page.setDefaultTimeout(8000);
   const state = { reports: structuredClone(originalReports), issues: structuredClone(originalIssues), failSubmit: false, failList: false, submissions: 0, keys: [], expire: false, slowDetail: false };
   page.on('pageerror', e => errors.push(e.message));
-  await context.addInitScript(role => localStorage.setItem('nagarsaathi_token', role), role);
+  await context.addInitScript(role => { if (role) localStorage.setItem('nagarsaathi_token', role); }, role);
   await context.route('**/*', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname;
     const api = /^\/(?:api\/)?(?:auth|reports|complaints|issues|processing)(?:\/|$)/.test(path);
@@ -38,7 +38,11 @@ async function setup(role = 'citizen', mobile = false) {
     if (endpoint === '/complaints') {
       if (state.failList) return send({ detail: 'List unavailable' }, 503);
       if (token === 'nigam') return send({ detail: 'Forbidden' }, 403);
-      const items = token === 'admin' ? state.reports.filter(r => !url.searchParams.has('needs_attention') || r.needs_attention) : [state.reports[0]];
+      let items = token === 'admin' ? state.reports.filter(r => !url.searchParams.has('needs_attention') || r.needs_attention) : [state.reports[0]];
+      const issue = url.searchParams.get('issue'), status = url.searchParams.get('status'), search = url.searchParams.get('search');
+      if (issue) items = items.filter(r => r.issue_type === issue || r.issue_type === 'both');
+      if (status) items = items.filter(r => r.status === status);
+      if (search) items = items.filter(r => r.description.toLowerCase().includes(search.toLowerCase()));
       return send(paginate(items, Number(url.searchParams.get('offset') || 0)));
     }
     if (endpoint === '/reports' && method === 'POST') {
@@ -68,12 +72,13 @@ async function setup(role = 'citizen', mobile = false) {
   });
   await page.goto(site);
   await page.locator('nav[aria-label="Workspace navigation"]').waitFor({ state: 'attached' });
+  if (role === 'citizen') await navigate(page, 'My Reports');
   return { context, page, state, calls, errors };
 }
 async function navigate(page, name) {
   const toggle = page.getByRole('button', { name: 'Toggle navigation' });
   if (await toggle.isVisible() && await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
-  await page.getByRole('button', { name, exact: true }).click();
+  await page.getByRole('navigation', { name: 'Workspace navigation' }).getByRole('button', { name, exact: true }).click();
 }
 async function noOverflow(page) { assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); }
 
@@ -171,16 +176,34 @@ try {
     const { context, page, calls } = await setup();
     try {
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
-      await page.getByLabel('Email address').fill('admin@example.test'); await page.getByLabel('Password', { exact: true }).fill('example-password');
       await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await page.getByLabel('Email address').fill('admin@example.test'); await page.getByLabel('Password', { exact: true }).fill('example-password');
+      await page.getByRole('dialog').getByRole('button', { name: 'Sign in', exact: true }).click();
       await page.getByText('PLATFORM ADMIN WORKSPACE', { exact: true }).first().waitFor();
       await page.getByRole('button', { name: 'Sign out', exact: true }).click();
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
       await page.getByRole('button', { name: 'New here? Register as a citizen' }).click();
       await page.getByLabel('Full name').fill('New Citizen'); await page.getByLabel('Email address').fill('citizen@example.test');
       await page.getByLabel('Password', { exact: true }).fill('example-password'); await page.getByRole('button', { name: 'Create citizen account', exact: true }).click();
-      await page.getByRole('heading', { name: 'Your voice. A better city.' }).waitFor();
+      await page.getByRole('heading', { name: 'Your city, at a glance.' }).waitFor();
       const registration = calls.find(c => c.endpoint === '/auth/register'); assert.equal(JSON.parse(registration.body).role, undefined);
       assert.equal(calls.some(c => /[?&]token=/.test(c.endpoint)), false);
+    } finally { await context.close(); }
+  });
+  await test('Chaitanya overview opens before sign-in without requesting private records', async () => {
+    const { context, page, calls, errors } = await setup(null);
+    try {
+      await page.getByRole('heading', { name: 'Your city, at a glance.' }).waitFor();
+      assert.equal(await page.locator('.metric.card').count(), 4);
+      await page.locator('.map-list .leaflet-map').waitFor();
+      assert.equal(calls.length, 0);
+      await page.getByRole('button', { name: 'Sign in', exact: true }).click();
+      await page.getByRole('dialog').getByLabel('Email address').waitFor();
+      await page.getByRole('button', { name: 'Close details' }).click();
+      assert.equal(await page.getByRole('dialog').count(), 0);
+      await page.setViewportSize({ width: 360, height: 800 }); await noOverflow(page);
+      assert.deepEqual(errors, []);
+      if (process.env.UI_SCREENSHOT_DIR) await page.screenshot({ path: join(process.env.UI_SCREENSHOT_DIR, 'chaitanya-overview-mobile.png'), fullPage: true });
     } finally { await context.close(); }
   });
   await test('expired sessions clear role data and require sign-in', async () => {

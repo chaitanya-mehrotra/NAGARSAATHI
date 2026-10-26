@@ -58,3 +58,18 @@
 }
 
 @media (max-width: 740px) { .sidebar:not(.open) { visibility: hidden; } .sidebar.open { visibility: visible; } }
+
+/* Restore Chaitanya's original overview and map/list composition. */
+.city-pagination { padding: 0 20px; border-top: 1px solid var(--border); }
+.city-stages { display: flex; justify-content: space-between; gap: 12px; padding: 10px 0; }
+.city-stages > div { flex: 1; font-size: 11px; line-height: 1.7; }
+.city-stages span { display: block; background: #e9f5f2; color: var(--teal); border-radius: 50%; width: 25px; height: 25px; text-align: center; line-height: 25px; margin-bottom: 10px; }
+.details-drawer .workflow-auth { padding: 0; margin: 0; }
+.details-drawer .workflow-auth .workflow-form { border: 0; padding: 12px 0; box-shadow: none; }
+.city-pagination .workflow-pager { margin: 14px 0; }
+@media (max-width: 740px) {
+  .top-actions .secondary { padding: 8px 10px; font-size: 10px; }
+  .topbar .top-actions { gap: 8px; }
+  .city-stages { gap: 7px; }
+  .city-stages > div { font-size: 10px; }
+}
