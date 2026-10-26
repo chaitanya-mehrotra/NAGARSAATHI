@@ -1,9 +1,2 @@
-fastapi>=0.115,<1
-uvicorn[standard]>=0.30,<1
-python-multipart>=0.0.18
-Pillow>=10,<13
-python-dotenv>=1,<2
-ultralytics==8.4.171
-torch==2.14.1
-torchvision==0.29.1
-httpx>=0.27
+# Compatibility developer environment; production intake needs requirements-api.txt only.
+-r requirements-worker.txt

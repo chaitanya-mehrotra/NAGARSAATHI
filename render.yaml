@@ -9,6 +9,10 @@ services:
     healthCheckPath: /api/ready
     numInstances: 1
     envVars:
+      - key: NAGARSAATHI_WORKER_TOKEN_SHA256
+        sync: false
+      - key: NAGARSAATHI_VISUAL_AUTO_MERGE
+        value: "0"
       - key: NAGARSAATHI_DATA_DIR
         value: /var/data
       - key: NAGARSAATHI_DEVICE

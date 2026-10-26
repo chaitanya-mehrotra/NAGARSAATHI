@@ -1,22 +1,16 @@
 """NAGARSAATHI FastAPI backend gateway. Run with uvicorn backend.main:app."""
-import io
 import logging
 import os
 from contextlib import asynccontextmanager
 from pathlib import Path
-from tempfile import TemporaryDirectory
 
 from dotenv import load_dotenv
-from fastapi import Depends, FastAPI, File, HTTPException, UploadFile
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from PIL import Image, ImageOps, UnidentifiedImageError
 from starlette.concurrency import run_in_threadpool
 
-# Ultralytics patches Image.open after startup. Keep Pillow's original decoder
-# for upload validation so malformed images cannot trigger optional HEIF imports.
-_PIL_OPEN = Image.open
 logger = logging.getLogger("uvicorn.error")
 load_dotenv(Path(__file__).resolve().parents[1] / ".env")
 
@@ -25,31 +19,20 @@ try:
     from backend.database import connect, init_db
     from backend.reports import router as reports_router
     from backend.issues import router as issues_router
+    from backend.worker_api import router as worker_router
 except ImportError:
     from accounts import current_user, router as accounts_router
     from database import connect, init_db
     from reports import router as reports_router
     from issues import router as issues_router
+    from worker_api import router as worker_router
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Safe database initialization
     await run_in_threadpool(init_db)
-    app.state.model_ready = False
-
-    try:
-        try:
-            from backend.inference import load_model
-        except ImportError:
-            from inference import load_model
-
-        await run_in_threadpool(load_model)
-        app.state.model_ready = True
-        logger.info("YOLO11n pothole/waterlogging model loaded successfully")
-    except Exception as e:
-        logger.warning(f"Model could not be loaded: {e}. Submissions will remain available.")
-
+    logger.info('Report intake ready; model inference runs in the separate PC worker')
     yield
 
 
@@ -79,6 +62,7 @@ app.add_middleware(
 app.include_router(accounts_router)
 app.include_router(reports_router)
 app.include_router(issues_router)
+app.include_router(worker_router)
 
 
 def error_response(status_code: int, code: str, message: str):
@@ -101,7 +85,7 @@ async def validation_error_handler(request, exc):
 def health():
     return {
         "status": "ok",
-        "model_ready": getattr(app.state, "model_ready", False),
+        "processing_mode": "external_worker",
     }
 
 
@@ -115,7 +99,7 @@ def metrics(user: dict = Depends(current_user)):
             if user["role"] != "admin":
                 where, params = "WHERE user_id=?", [user["id"]]
         rows = db.execute(f"SELECT * FROM {table} {where}", params).fetchall()
-        issue_count = len(rows) if unit == "issues" else len({r["issue_id"] for r in rows})
+        issue_count = len(rows) if unit == "issues" else len({r["issue_id"] for r in rows if r['issue_id'] is not None})
         status_counts = {name: sum(r["status"] == name for r in rows)
                          for name in ("open", "in_progress", "resolved", "rejected", "submitted", "under_review")}
         return {
@@ -127,11 +111,9 @@ def metrics(user: dict = Depends(current_user)):
 
 @app.get("/ready")
 def ready():
-    if not getattr(app.state, "model_ready", False):
-        return error_response(503, "MODEL_UNAVAILABLE", "The model has not finished loading")
     with connect() as db:
         db.execute("SELECT 1").fetchone()
-    return {"status": "ready", "model_ready": True}
+    return {"status": "ready", "processing_mode": "external_worker"}
 
 
 @app.get("/complaints")
@@ -195,58 +177,8 @@ def get_complaint_alias(complaint_id: int, user: dict = Depends(current_user)):
     return get_report(report_id=complaint_id, user=user)
 
 
-@app.post("/dev/detect", tags=["Local model testing"])
-def test_photo(image: UploadFile = File(...), user: dict = Depends(current_user)):
-    if not getattr(app.state, "model_ready", False):
-        return error_response(
-            503,
-            "MODEL_UNAVAILABLE",
-            "The model is not ready. Check server logs.",
-        )
-
-    # Read at most 10 MB plus one byte
-    image_bytes = image.file.read(10_000_000 + 1)
-    if len(image_bytes) > 10_000_000:
-        return error_response(
-            413,
-            "IMAGE_TOO_LARGE",
-            "Upload an image smaller than or equal to 10 MB.",
-        )
-
-    try:
-        with _PIL_OPEN(io.BytesIO(image_bytes), formats=["JPEG", "PNG", "WEBP"]) as original:
-            if original.format not in {"JPEG", "PNG", "WEBP"}:
-                raise ValueError("Unsupported format")
-            if getattr(original, "n_frames", 1) != 1:
-                raise ValueError("Animated images are unsupported")
-            if original.width * original.height > 24_000_000:
-                raise ValueError("Image exceeds megapixel limit")
-
-            corrected = ImageOps.exif_transpose(original).convert("RGB")
-            canonical = Image.new("RGB", corrected.size)
-            canonical.paste(corrected)
-    except (UnidentifiedImageError, OSError, ValueError, Image.DecompressionBombError):
-        return error_response(
-            400,
-            "INVALID_IMAGE",
-            "Upload a valid, single-frame JPEG or PNG image.",
-        )
-
-    try:
-        try:
-            from backend.inference import detect_potholes
-        except ImportError:
-            from inference import detect_potholes
-
-        with TemporaryDirectory() as temp_dir:
-            temp_path = Path(temp_dir) / "test.png"
-            canonical.save(temp_path, format="PNG")
-            result = detect_potholes(str(temp_path))
-        return result
-    except Exception as e:
-        logger.exception("Photo detection failed")
-        return error_response(
-            503,
-            "ANALYSIS_UNAVAILABLE",
-            "The photo could not be analysed. Please retry or submit for human review.",
-        )
+@app.post("/dev/detect", deprecated=True)
+def test_photo(user: dict = Depends(current_user)):
+    if user["role"] != "admin":
+        raise HTTPException(403, "Citizen-side model preview is disabled")
+    raise HTTPException(410, "Use the queued processing worker; inline inference has been removed")
