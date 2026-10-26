@@ -207,3 +207,18 @@ change to shared build configuration. If edits are not reflected, restart Vite.
 Final checks after restoration: 9 frontend checks and 8 browser scenarios passed;
 production build and diff whitespace check passed. The extra browser scenario checks
 the original guest dashboard, zero private requests, sign-in drawer and 360px layout.
+
+## Local registration connection check
+
+A browser `Failed to fetch` at registration was traced to no API listening on the
+frontend's configured port 8002; an unrelated running API on 8001 also rejected the
+5176 browser origin. For this preview, use the configured API base on 8002 and allow
+http://127.0.0.1:5176 (and http://localhost:5176 if used) through the backend's existing
+ALLOWED_ORIGINS environment setting. The browser URL and API port are different.
+Backend source changes are not needed. Frontend fixture tests do not test real CORS.
+
+Verified against the actual running API: OPTIONS /auth/register returned 200 with
+the correct allowed origin; a separate browser test account registered with HTTP 201,
+automatically signed in, and GET /auth/me returned 200 with role citizen and no page
+errors. The existing 8000/8001 processes were left untouched. Stopping the API will
+make registration unavailable again; retain the appropriate local service setup.
