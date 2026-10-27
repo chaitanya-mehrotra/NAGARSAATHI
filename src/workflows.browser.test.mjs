@@ -15,12 +15,12 @@ async function setup(role = 'citizen', mobile = false) {
   const context = await browser.newContext({ viewport: mobile ? { width: 360, height: 800 } : { width: 1440, height: 1000 } });
   const page = await context.newPage(), calls = [], errors = [];
   page.setDefaultTimeout(8000);
-  const state = { reports: structuredClone(originalReports), issues: structuredClone(originalIssues), failSubmit: false, failList: false, submissions: 0, keys: [], expire: false, slowDetail: false };
+  const state = { reports: structuredClone(originalReports), issues: structuredClone(originalIssues), work: {}, failSubmit: false, failList: false, submissions: 0, keys: [], expire: false, slowDetail: false };
   page.on('pageerror', e => errors.push(e.message));
   await context.addInitScript(role => { if (role) localStorage.setItem('nagarsaathi_token', role); }, role);
   await context.route('**/*', async route => {
     const req = route.request(), url = new URL(req.url()), path = url.pathname;
-    const api = /^\/(?:api\/)?(?:auth|reports|complaints|issues|processing)(?:\/|$)/.test(path);
+    const api = /^\/(?:api\/)?(?:auth|reports|complaints|issues|processing|moderation|work)(?:\/|$)/.test(path);
     if (!api) {
       if (/tile.openstreetmap|fonts.googleapis|fonts.gstatic/.test(url.hostname)) return route.abort();
       return route.continue();
@@ -30,15 +30,40 @@ async function setup(role = 'citizen', mobile = false) {
     const send = (body, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body), headers: { 'access-control-allow-origin': '*' } });
     if (method === 'OPTIONS') return route.fulfill({ status: 204, headers: { 'access-control-allow-origin': '*', 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
     if (endpoint === '/auth/login') return send({ access_token: JSON.parse(req.postData()).email.split('@')[0] });
+    if (endpoint === '/auth/options') return send({ google_client_id: null });
     if (endpoint === '/auth/register') return send({ id: 1, role: 'citizen' }, 201);
     if (endpoint === '/auth/logout') return route.fulfill({ status: 204 });
     if (!users[token] || state.expire) return send({ detail: 'Session expired' }, 401);
     if (endpoint === '/auth/me') return send(users[token]);
+    if (endpoint === '/work/accounts') return send([users.admin, users.nigam]);
+    if (endpoint === '/moderation/reports') return send(paginate(state.reports.filter(r => r.archived_at), Number(url.searchParams.get('offset') || 0)));
+    const moderate = endpoint.match(/^\/moderation\/reports\/(\d+)\/(archive|restore)$/);
+    if (moderate) {
+      if (token !== 'admin') return send({ detail: 'Forbidden' }, 403);
+      const r = state.reports.find(r => r.id === Number(moderate[1])); r.archived_at = moderate[2] === 'archive' ? Date.now() / 1000 : null;
+      r.archive_reason = JSON.parse(req.postData()).reason; return send({ id: r.id, archived: !!r.archived_at });
+    }
+    const work = endpoint.match(/^\/issues\/(\d+)\/(work|assignment|repairs)(?:\/(\d+)\/review)?$/);
+    if (work) {
+      const id = Number(work[1]), issue = state.issues.find(i => i.id === id);
+      const current = state.work[id] ||= { assignment: null, repairs: [] };
+      if (work[2] === 'assignment') { current.assignment = { ...JSON.parse(req.postData()), version: 1 }; issue.work_order = current.assignment; }
+      if (work[2] === 'repairs' && !work[3]) {
+        current.assignment.version++; current.repairs.unshift({ id: 1, note: 'Repair completed on site', state: 'pending', photo_url: `/issues/${id}/repairs/1/photo`, submitted_by: users[token].id });
+        issue.status = 'in_progress'; issue.pending_repair = true;
+      } else if (work[3]) {
+        current.repairs[0].state = JSON.parse(req.postData()).decision;
+        issue.status = current.repairs[0].state === 'verified' ? 'resolved' : 'in_progress'; issue.pending_repair = false;
+      }
+      return send({ ...current, can_submit: current.assignment?.assigned_to === users[token].id,
+        repairs: current.repairs.map(r => ({ ...r, can_review: token === 'admin' && r.submitted_by !== users[token].id })) });
+    }
+    if (/^\/issues\/\d+\/history$/.test(endpoint)) return send([]);
     if (endpoint === '/processing/health') return token === 'admin' ? send(processingHealth) : send({ detail: 'Forbidden' }, 403);
     if (endpoint === '/complaints') {
       if (state.failList) return send({ detail: 'List unavailable' }, 503);
       if (token === 'nigam') return send({ detail: 'Forbidden' }, 403);
-      let items = token === 'admin' ? state.reports.filter(r => !url.searchParams.has('needs_attention') || r.needs_attention) : [state.reports[0]];
+      let items = (token === 'admin' ? state.reports.filter(r => !url.searchParams.has('needs_attention') || r.needs_attention) : [state.reports[0]]).filter(r => !r.archived_at);
       const issue = url.searchParams.get('issue'), status = url.searchParams.get('status'), search = url.searchParams.get('search');
       if (issue) items = items.filter(r => r.issue_type === issue || r.issue_type === 'both');
       if (status) items = items.filter(r => r.status === status);
@@ -57,7 +82,7 @@ async function setup(role = 'citizen', mobile = false) {
       // Deliberately include technical extras: citizen must not render any of them.
       return send({ ...state.reports.find(r => String(r.id) === report[1]), model_version: 'SECRET-MODEL', confidence: .99, duplicate_of: 12 });
     }
-    if (/^\/(issues|reports)\/\d+\/photo$/.test(endpoint)) return route.fulfill({ status: 200, contentType: 'image/png', body: pixel });
+    if (/^\/(issues|reports)\/\d+(?:\/repairs\/\d+)?\/photo$/.test(endpoint)) return route.fulfill({ status: 200, contentType: 'image/png', body: pixel });
     if (endpoint === '/issues') return send(paginate(state.issues, Number(url.searchParams.get('offset') || 0)));
     const issue = endpoint.match(/^\/issues\/(\d+)$/);
     if (issue) return send({ ...state.issues.find(i => String(i.id) === issue[1]), reporter_email: 'PRIVATE-REPORTER@example.test', reports: state.reports });
@@ -83,6 +108,43 @@ async function navigate(page, name) {
 async function noOverflow(page) { assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true); }
 
 try {
+  await test('admin archive is reversible inside the preserved Chaitanya workspace', async () => {
+    const { context, page, state, errors } = await setup('admin');
+    try {
+      await page.getByRole('button', { name: 'Inspect submission' }).first().click();
+      await page.getByLabel('Moderation reason').fill('Off-topic test complaint');
+      await page.getByRole('button', { name: 'Archive report', exact: true }).click();
+      await page.getByRole('heading', { name: 'Restore archived report' }).waitFor();
+      await page.getByRole('button', { name: 'Close details' }).click(); await navigate(page, 'Archived reports');
+      await page.getByText('1 archived reports.', { exact: false }).waitFor();
+      await page.getByRole('button', { name: 'Inspect or restore report' }).click();
+      await page.getByLabel('Moderation reason').fill('Restored after review');
+      await page.getByRole('button', { name: 'Restore report', exact: true }).click();
+      await page.getByRole('heading', { name: 'Archive report', exact: true }).waitFor();
+      assert.equal(state.reports[0].archived_at, null); assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
+  await test('assignment, Nigam repair photo and independent admin approval share the same UI', async () => {
+    const { context, page, state, errors } = await setup('admin');
+    async function switchTo(role) {
+      await page.evaluate(role => { localStorage.setItem('nagarsaathi_token', role); window.dispatchEvent(new Event('nagarsaathi-session')); }, role);
+      await page.getByText(role === 'nigam' ? 'NAGAR NIGAM WORKSPACE' : 'PLATFORM ADMIN WORKSPACE', { exact: true }).first().waitFor();
+    }
+    try {
+      await navigate(page, 'Shared issues'); await page.getByRole('button', { name: 'View issue & repair progress' }).first().click();
+      await page.getByLabel('Responsible staff account').selectOption('3'); await page.getByLabel('Repair team', { exact: true }).fill('Road crew');
+      await page.getByLabel('Assignment note').fill('Repair pothole beside bus stop'); await page.getByRole('button', { name: 'Save assignment' }).click();
+      await page.getByRole('heading', { name: 'Change assignment' }).waitFor();
+      await switchTo('nigam'); await page.getByLabel('Repair photo', { exact: true }).setInputFiles({ name: 'repair.png', mimeType: 'image/png', buffer: pixel });
+      await page.getByLabel('Completed work note').fill('Repair completed on site'); await page.getByRole('button', { name: 'Submit repair for approval' }).click();
+      await page.getByRole('heading', { name: 'Repair evidence · pending' }).waitFor();
+      assert.equal(state.issues[0].status, 'in_progress');
+      await switchTo('admin'); await page.getByLabel('Review note', { exact: true }).fill('Independently verified repaired surface');
+      await page.getByRole('button', { name: 'Record repair review' }).click();
+      await page.getByRole('heading', { name: 'Repair evidence · verified' }).waitFor();
+      assert.equal(state.issues[0].status, 'resolved'); await noOverflow(page); assert.deepEqual(errors, []);
+    } finally { await context.close(); }
+  });
   await test('mobile citizen submits without analysis, retries idempotently, tracks pending then repair updates', async () => {
     const { context, page, state, calls, errors } = await setup('citizen', true);
     try {

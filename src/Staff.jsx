@@ -3,11 +3,13 @@ import { request, json } from './services';
 import { issueLabels } from './validation';
 import { pageOf, repairLabels, verificationLabels, locationLabel, dateLabel } from './workflows';
 import { Notice, Pager, Photo, useRemote } from './ui';
+import { WorkOrders, IssueHistory } from './Collection';
 
 export function Counts({ item }) {
   return <dl className="workflow-counts"><div><dt>Reports</dt><dd>{item.report_count ?? 'Not supplied'}</dd></div>
     <div><dt>Distinct accounts</dt><dd>{item.reporter_count ?? 'Not supplied'}</dd></div>
-    <div><dt>Distinct photos</dt><dd>{item.unique_photo_count ?? 'Not supplied'}</dd></div></dl>;
+    <div><dt>Distinct photos</dt><dd>{item.unique_photo_count ?? 'Not supplied'}</dd></div>
+    {item.archived_report_count > 0 && <div><dt>Active / archived</dt><dd>{item.active_report_count} / {item.archived_report_count}</dd></div>}</dl>;
 }
 export function Priority({ item }) {
   return <section className="workflow-priority"><strong>Automatic priority: {item.priority_score ?? 'Pending'}</strong>
@@ -17,9 +19,9 @@ export function Priority({ item }) {
 export function ProcessingHealth() {
   const state = useRemote(signal => request('/processing/health', { signal }), [], 15000);
   return <section className="card workflow-record"><h2>Processing health</h2><Notice state={state}>{state.data && <>
-    <dl className="workflow-counts"><div><dt>Queued jobs</dt><dd>{state.data.queued_count ?? 'Not supplied'}</dd></div>
-      <div><dt>Failed jobs</dt><dd>{state.data.failed_count ?? 'Not supplied'}</dd></div><div><dt>Worker</dt><dd>{state.data.worker_status || 'Unknown'}</dd></div></dl>
-    <p className="muted">Last worker heartbeat: {dateLabel(state.data.last_heartbeat_at)}</p>
+    <dl className="workflow-counts"><div><dt>Queued jobs</dt><dd>{state.data.queue?.queued ?? state.data.queued_count ?? 'Not supplied'}</dd></div>
+      <div><dt>Failed jobs</dt><dd>{state.data.queue?.failed ?? state.data.failed_count ?? 'Not supplied'}</dd></div><div><dt>Worker</dt><dd>{state.data.worker_status || (state.data.worker_online ? 'Online' : 'Offline')}</dd></div></dl>
+    <p className="muted">Last worker heartbeat: {dateLabel(state.data.last_heartbeat_at || Math.max(0, ...(state.data.workers || []).map(w => w.last_seen)) || null)}</p>
     {state.data.message && <p>{state.data.message}</p>}</>}</Notice></section>;
 }
 export function AdminInbox({ openReport, openIssue, exceptions = false }) {
@@ -55,7 +57,7 @@ export function IssueList({ role, openIssue }) {
       {!state.data.items.length && <p className="workflow-notice">{queue === 'active' ? 'No published issues in the active queue.' : 'No resolved issues yet.'}</p>}
       <Pager total={state.data.total} offset={offset} limit={20} onChange={setOffset} /></>}</Notice></>;
 }
-export function RepairActions({ issue, reload }) {
+export function RepairActions({ issue, reload, role }) {
   const [status, setStatus] = useState(issue.status), [note, setNote] = useState(''), [error, setError] = useState(''), [success, setSuccess] = useState(''), [saving, setSaving] = useState(false);
   const controller = useRef(null), lock = useRef(false);
   useEffect(() => () => controller.current?.abort(), []);
@@ -70,10 +72,10 @@ export function RepairActions({ issue, reload }) {
     finally { lock.current = false; if (!controller.current.signal.aborted) setSaving(false); }
   }
   return <form className="workflow-actions" onSubmit={save}><h3>Update repair progress</h3><label htmlFor="repair-status">Repair status</label>
-    <select id="repair-status" value={status} onChange={e => setStatus(e.target.value)}>{Object.entries(repairLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
+    <select id="repair-status" value={status} onChange={e => setStatus(e.target.value)}>{Object.entries(repairLabels).filter(([value]) => (role !== 'nigam' || value !== 'rejected') && (!issue.work_order || value !== 'resolved' || issue.status === 'resolved')).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select>
     <label htmlFor="repair-note">Progress note / decision reason</label><textarea id="repair-note" maxLength={1000} rows={3} value={note} onChange={e => setNote(e.target.value)} required />
-    <p className="muted">The service authorizes and audits this action. Closing an issue requires a recorded reason.</p>
-    {error && <p className="error-box" role="alert">{error}</p>}{success && <p role="status">{success}</p>}<button className="primary" disabled={saving}>{saving ? 'Saving…' : 'Save repair update'}</button></form>;
+    <p className="muted">{issue.pending_repair ? 'Repair evidence awaits independent approval below.' : issue.work_order ? 'Assigned work needs repair photos and independent approval before resolution.' : 'The service authorizes and audits this action. Closing an issue requires a recorded reason.'}</p>
+    {error && <p className="error-box" role="alert">{error}</p>}{success && <p role="status">{success}</p>}<button className="primary" disabled={saving || issue.pending_repair}>{saving ? 'Saving…' : 'Save repair update'}</button></form>;
 }
 export function ExceptionReview({ report, reload }) {
   const [decision, setDecision] = useState('needs_review'), [reason, setReason] = useState(''), [error, setError] = useState(''), [saving, setSaving] = useState(false);
@@ -101,5 +103,6 @@ export function IssueDetail({ id, role }) {
     <Photo path={`/issues/${id}/photo`} alt="Representative evidence for the consolidated issue" /><p className="review-description">{state.data.description}</p>
     <p>Location: {locationLabel(state.data)}</p><Counts item={state.data} /><Priority item={state.data} />
     {role === 'admin' && <p>Grouping: {state.data.grouping_reason || 'Not supplied'}</p>}
-    <RepairActions key={state.data.id + ':' + state.data.status} issue={state.data} reload={state.reload} /></>}</Notice>;
+    <RepairActions key={state.data.id + ':' + state.data.status} issue={state.data} reload={state.reload} role={role} />
+    <WorkOrders issue={state.data} role={role} refreshIssue={state.reload} /><IssueHistory id={id} /></>}</Notice>;
 }

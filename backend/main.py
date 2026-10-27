@@ -20,12 +20,18 @@ try:
     from backend.reports import router as reports_router
     from backend.issues import router as issues_router
     from backend.worker_api import router as worker_router
+    from backend.moderation import router as moderation_router
+    from backend.work_orders import router as work_router
+    from backend.google_auth import router as google_router
 except ImportError:
     from accounts import current_user, router as accounts_router
     from database import connect, init_db
     from reports import router as reports_router
     from issues import router as issues_router
     from worker_api import router as worker_router
+    from moderation import router as moderation_router
+    from work_orders import router as work_router
+    from google_auth import router as google_router
 
 
 @asynccontextmanager
@@ -63,6 +69,9 @@ app.include_router(accounts_router)
 app.include_router(reports_router)
 app.include_router(issues_router)
 app.include_router(worker_router)
+app.include_router(moderation_router)
+app.include_router(work_router)
+app.include_router(google_router)
 
 
 def error_response(status_code: int, code: str, message: str):
@@ -93,11 +102,11 @@ def health():
 def metrics(user: dict = Depends(current_user)):
     with connect() as db:
         if user["role"] == "nigam":
-            table, where, params, unit = "issues", "WHERE published=1", [], "issues"
+            table, where, params, unit = "issues", "WHERE published=1 AND EXISTS(SELECT 1 FROM reports r WHERE r.issue_id=issues.id AND r.archived_at IS NULL)", [], "issues"
         else:
-            table, where, params, unit = "reports", "", [], "reports"
+            table, where, params, unit = "reports", "WHERE archived_at IS NULL", [], "reports"
             if user["role"] != "admin":
-                where, params = "WHERE user_id=?", [user["id"]]
+                where, params = "WHERE archived_at IS NULL AND user_id=?", [user["id"]]
         rows = db.execute(f"SELECT * FROM {table} {where}", params).fetchall()
         issue_count = len(rows) if unit == "issues" else len({r["issue_id"] for r in rows if r['issue_id'] is not None})
         status_counts = {name: sum(r["status"] == name for r in rows)
@@ -126,13 +135,18 @@ def list_complaints_alias(
     sort: str = "newest",
     offset: int = 0,
     limit: int = 40,
+    needs_attention: bool = False,
     mine: bool = False,
     user: dict = Depends(current_user)
 ):
     if user["role"] == "nigam":
         raise HTTPException(403, "Use the consolidated issues endpoint")
-    where_parts = []
+    if not 1 <= limit <= 100 or offset < 0:
+        raise HTTPException(400, 'Limit must be 1–100 and offset non-negative')
+    where_parts = ['archived_at IS NULL']
     params = []
+    if needs_attention and user['role'] == 'admin':
+        where_parts.append("(verification_status='needs_review' OR analysis_status='failed')")
     if mine or user["role"] != "admin":
         where_parts.append("user_id = ?")
         params.append(user["id"])

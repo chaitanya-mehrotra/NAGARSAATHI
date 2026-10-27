@@ -50,6 +50,7 @@ def serialize(row, db=None, include_candidates=False) -> dict:
         report["issue_summary"] = issue if include_candidates else {
             name: issue[name] for name in ("id", "report_count", "reporter_count", "unique_photo_count", "status")
         }
+        report['issue'] = issue
         if include_candidates:
             report["duplicate_candidates"] = [
                 {"issue_id": candidate["issue_id"], "reason": candidate["reason"], "issue": summary(db, candidate["issue_id"])}
@@ -58,6 +59,10 @@ def serialize(row, db=None, include_candidates=False) -> dict:
     if db is not None:
         job = db.execute('SELECT state,attempts,error_code,updated_at FROM analysis_jobs WHERE report_id=?', (row['id'],)).fetchone()
         report['processing'] = dict(job) if job else None
+        report['processing_status'] = job['state'] if job else report['analysis_status']
+        report['needs_attention'] = report['verification_status'] == 'needs_review' or bool(job and job['state'] == 'failed')
+        report['exception_reason'] = report['verification_reason'] if report['needs_attention'] else None
+    report['reference'] = f"NS-{row['id']:08d}"
     return report
 
 
@@ -65,7 +70,7 @@ def accessible_report(db, report_id: int, user: dict):
     if user["role"] == "nigam":
         raise HTTPException(403, "Municipal accounts access consolidated issues, not individual reports")
     row = db.execute("SELECT * FROM reports WHERE id=?", (report_id,)).fetchone()
-    if row is None or (user["role"] != "admin" and row["user_id"] != user["id"]):
+    if row is None or (user["role"] != "admin" and (row['user_id'] != user['id'] or row['archived_at'] is not None)):
         raise HTTPException(404, "Report not found")
     return row
 
@@ -167,7 +172,7 @@ def list_reports(
     if not 1 <= limit <= 100 or offset < 0:
         raise HTTPException(400, "Limit must be 1–100 and offset non-negative")
 
-    where, params = ("", []) if user["role"] == "admin" else ("WHERE user_id = ?", [user["id"]])
+    where, params = ("WHERE archived_at IS NULL", []) if user["role"] == "admin" else ("WHERE archived_at IS NULL AND user_id = ?", [user["id"]])
     with connect() as db:
         rows = db.execute(
             f"""SELECT * FROM reports {where}

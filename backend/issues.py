@@ -31,17 +31,19 @@ def require_staff(user):
 def accessible_issue(db, issue_id, user):
     require_staff(user)
     issue = summary(db, issue_id)
-    if issue is None or (user["role"] == "nigam" and not issue["published"]):
+    if issue is None or (user["role"] == "nigam" and (not issue["published"] or not issue['active_report_count'])):
         raise HTTPException(404, "Issue not found")
     return issue
 
 
 @router.get("")
 def list_issues(limit: int = Query(40, ge=1, le=100), offset: int = Query(0, ge=0),
-                search: str = "", issue: str = "", status: str = "", sort: str = "priority",
+                search: str = "", issue: str = "", status: str = "", sort: str = "priority", queue: str = '',
                 user: dict = Depends(current_user)):
     require_staff(user)
-    clauses, params = ["EXISTS(SELECT 1 FROM reports r WHERE r.issue_id=i.id)"], []
+    clauses, params = ["EXISTS(SELECT 1 FROM reports r WHERE r.issue_id=i.id AND r.archived_at IS NULL)"], []
+    if queue == 'resolved':
+        status = 'resolved'
     if user["role"] == "nigam":
         clauses.append("i.published=1")
     if issue:
@@ -93,7 +95,7 @@ def publication(issue_id: int, body: Publication, user: dict = Depends(admin_use
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         accessible_issue(db, issue_id, user)
-        if body.published and not db.execute("SELECT 1 FROM reports WHERE issue_id=? AND verification_status='supported'", (issue_id,)).fetchone():
+        if body.published and not db.execute("SELECT 1 FROM reports WHERE issue_id=? AND archived_at IS NULL AND verification_status='supported'", (issue_id,)).fetchone():
             raise HTTPException(409, 'Review supporting evidence before publishing this issue')
         db.execute("UPDATE issues SET published=?,publication_mode=? WHERE id=?", (int(body.published), 'manual' if body.published else 'withheld', issue_id))
         record_event(db, issue_id, 'publication', {'published':body.published}, user['id'])
@@ -112,6 +114,8 @@ def move_report(report_id: int, body: Grouping, user: dict = Depends(admin_user)
     with connect() as db:
         db.execute("BEGIN IMMEDIATE")
         report = reports.accessible_report(db, report_id, user)
+        if report['archived_at'] is not None:
+            raise HTTPException(409, 'Restore the report before regrouping')
         if report['analysis_status'] in ('pending', 'queued', 'processing'):
             raise HTTPException(409, 'Wait for processing or review the exception before grouping')
         old_id = report["issue_id"]
@@ -155,6 +159,12 @@ def change_status(issue_id: int, body: StatusUpdate, user: dict = Depends(curren
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         old = accessible_issue(db, issue_id, user)
+        if db.execute('SELECT 1 FROM work_orders WHERE issue_id=?',(issue_id,)).fetchone():
+            if body.status == 'resolved' and old['status'] != 'resolved':
+                raise HTTPException(409, 'Submit repair evidence and obtain independent verification before resolving assigned work')
+            if db.execute("SELECT 1 FROM repair_evidence WHERE issue_id=? AND state='pending'",(issue_id,)).fetchone():
+                raise HTTPException(409, 'Review pending repair evidence before changing the work stage')
+            db.execute('UPDATE work_orders SET version=version+1,updated_at=? WHERE issue_id=?',(int(time.time()),issue_id))
         db.execute('UPDATE issues SET status=? WHERE id=?', (body.status, issue_id))
         db.execute('UPDATE reports SET status=?,processing_revision=processing_revision+1 WHERE issue_id=?', (body.status, issue_id))
         record_event(db, issue_id, 'repair_status', {'from':old['status'],'status':body.status,'note':body.note.strip()}, user['id'])
@@ -167,4 +177,4 @@ def history(issue_id: int, user: dict = Depends(current_user)):
     with connect() as db:
         accessible_issue(db, issue_id, user)
         events = db.execute('SELECT event,details,created_at FROM issue_history WHERE issue_id=? ORDER BY id', (issue_id,)).fetchall()
-        return [dict(row) for row in events if user['role'] == 'admin' or row['event'] == 'repair_status']
+        return [dict(row) for row in events if user['role'] == 'admin' or row['event'] in ('repair_status','work_assignment','repair_submitted','repair_review')]

@@ -7,6 +7,7 @@ import { CitizenSubmit, CitizenReports, TrackingStatus } from './Citizen';
 import { AdminInbox, IssueList, IssueDetail, Counts, Priority, ExceptionReview } from './Staff';
 import { Modal, Notice, Photo, useRemote } from './ui';
 import CityOverview from './CityOverview';
+import { Archive, GoogleSignIn, ReportModeration } from './Collection';
 import './style.css';
 import './workflows.css';
 
@@ -57,12 +58,12 @@ function Auth({ error: sessionError, retry }) {
       <label htmlFor="password">Password</label><input id="password" name="password" type="password" required minLength={mode === 'register' ? 10 : 1} maxLength={128} autoComplete={mode === 'register' ? 'new-password' : 'current-password'} />
       {error && <div className="error-box" role="alert">{error}</div>}<button className="primary" disabled={busy}>{busy ? 'Please wait…' : mode === 'register' ? 'Create citizen account' : 'Sign in'}</button>
     </form><button className="text-button" disabled={busy} onClick={() => { setMode(mode === 'login' ? 'register' : 'login'); setError(''); }}>{mode === 'login' ? 'New here? Register as a citizen' : 'Already registered? Sign in'}</button>
-    <p className="muted">Staff accounts are created by the platform administrator. Public registration creates citizen accounts only.</p>
+    <GoogleSignIn /><p className="muted">Staff accounts are created by the platform administrator. Public registration creates citizen accounts only.</p>
   </section></main>;
 }
 const navigation = {
   citizen: [['Overview', LayoutDashboard], ['Report Issue', Plus], ['Complaint Map', MapIcon], ['My Reports', FileText]],
-  admin: [['All submissions', LayoutDashboard], ['Overview', MapIcon], ['Exceptions', AlertCircle], ['Shared issues', FileText]],
+  admin: [['All submissions', LayoutDashboard], ['Overview', MapIcon], ['Exceptions', AlertCircle], ['Shared issues', FileText], ['Archived reports', ShieldCheck]],
   nigam: [['Published issues', LayoutDashboard]],
 };
 function Workspace({ user, authError = '', retrySession }) {
@@ -82,7 +83,7 @@ function Workspace({ user, authError = '', retrySession }) {
         {(page === 'Overview' || page === 'Complaint Map') && <CityOverview key={page} user={user} mapOnly={page === 'Complaint Map'} openReport={openReport} report={() => setPage(role === 'admin' ? 'All submissions' : 'Report Issue')} signIn={() => setAuthOpen(true)} />}
         {role === 'citizen' && page === 'Report Issue' && user && <CitizenSubmit openReport={openReport} />}
         {role === 'citizen' && page === 'My Reports' && user && <CitizenReports openReport={openReport} />}
-        {role === 'admin' && page !== 'Overview' && (page === 'Shared issues' ? <IssueList role="admin" openIssue={openIssue} /> : <AdminInbox key={page} exceptions={page === 'Exceptions'} openReport={openReport} openIssue={openIssue} />)}
+        {role === 'admin' && page !== 'Overview' && (page === 'Archived reports' ? <Archive openReport={openReport} /> : page === 'Shared issues' ? <IssueList role="admin" openIssue={openIssue} /> : <AdminInbox key={page} exceptions={page === 'Exceptions'} openReport={openReport} openIssue={openIssue} />)}
         {role === 'nigam' && <IssueList role="nigam" openIssue={openIssue} />}
       </main><footer className="workflow-footer">NAGARSAATHI · Your city. Our responsibility.</footer></div>
     {authOpen && <Modal title="Sign in to NAGARSAATHI" close={closeAuth}><Auth error={authError} retry={retrySession || (() => {})} /></Modal>}
@@ -98,7 +99,7 @@ function ReportDetail({ id, role, openIssue }) {
       {state.data.exception_reason && <div className="workflow-exception">{state.data.exception_reason}</div>}
       {state.data.issue_id != null && <button className="text-button" onClick={() => openIssue(state.data.issue_id)}>Shared issue #{state.data.issue_id} →</button>}
       <p>{state.data.grouping_reason || 'Grouping explanation not supplied yet.'}</p>{state.data.issue && <><Counts item={state.data.issue} /><Priority item={state.data.issue} /></>}
-      {state.data.needs_attention && <ExceptionReview key={id} report={state.data} reload={state.reload} />}</section>}
+      {state.data.needs_attention && !state.data.archived_at && <ExceptionReview key={id} report={state.data} reload={state.reload} />}<ReportModeration report={state.data} reload={state.reload} /></section>}
   </>}</Notice>;
 }
 createRoot(document.getElementById('root')).render(<App />);

@@ -27,9 +27,9 @@ def priority(reporter_count, first_seen, now=None):
 
 
 def refresh_issue(db, issue_id, now=None):
-    row = db.execute("""SELECT i.*, MIN(r.created_at) AS first_seen,
-        COUNT(DISTINCT CASE WHEN r.verification_status='supported' THEN r.user_id END) AS eligible_reporters,
-        SUM(r.verification_status='supported') AS supported_reports
+    row = db.execute("""SELECT i.*, COALESCE(MIN(CASE WHEN r.archived_at IS NULL THEN r.created_at END),MIN(r.created_at)) AS first_seen,
+        COUNT(DISTINCT CASE WHEN r.verification_status='supported' AND r.archived_at IS NULL THEN r.user_id END) AS eligible_reporters,
+        SUM(r.verification_status='supported' AND r.archived_at IS NULL) AS supported_reports
         FROM issues i JOIN reports r ON r.issue_id=i.id WHERE i.id=? GROUP BY i.id""", (issue_id,)).fetchone()
     if not row:
         return

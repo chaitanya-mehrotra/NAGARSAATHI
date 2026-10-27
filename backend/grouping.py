@@ -33,10 +33,14 @@ def new_issue(db, report):
 
 
 def sync_representative(db, issue_id):
-    row = db.execute("SELECT MIN(id) AS id FROM reports WHERE issue_id=?", (issue_id,)).fetchone()
+    row = db.execute("SELECT COALESCE(MIN(CASE WHEN archived_at IS NULL THEN id END), MIN(id)) AS id FROM reports WHERE issue_id=?", (issue_id,)).fetchone()
     if row["id"] is None:
         db.execute("DELETE FROM duplicate_candidates WHERE issue_id=?", (issue_id,))
-        db.execute("DELETE FROM issues WHERE id=?", (issue_id,))
+        if db.execute('SELECT 1 FROM work_orders WHERE issue_id=?',(issue_id,)).fetchone():
+            # Preserve assignments/repair evidence when the last member is regrouped.
+            db.execute("UPDATE issues SET published=0,publication_mode='withheld',priority_score=0,priority_reason='No linked reports; retained work history' WHERE id=?",(issue_id,))
+        else:
+            db.execute("DELETE FROM issues WHERE id=?", (issue_id,))
     else:
         db.execute("UPDATE issues SET representative_report_id=? WHERE id=?", (row["id"], issue_id))
 
@@ -81,8 +85,11 @@ def summary(db, issue_id):
     row = db.execute(
         """SELECT i.*, COUNT(r.id) AS report_count, COUNT(DISTINCT r.user_id) AS reporter_count,
         COUNT(DISTINCT COALESCE(r.image_sha256, 'legacy:' || r.id)) AS unique_photo_count,
+        SUM(r.id IS NOT NULL AND r.archived_at IS NULL) AS active_report_count,
+        COUNT(DISTINCT CASE WHEN r.archived_at IS NULL THEN r.user_id END) AS active_reporter_count,
+        SUM(r.id IS NOT NULL AND r.archived_at IS NOT NULL) AS archived_report_count,
         MAX(r.created_at) AS last_report_at
-        FROM issues i JOIN reports r ON r.issue_id=i.id WHERE i.id=? GROUP BY i.id""", (issue_id,),
+        FROM issues i LEFT JOIN reports r ON r.issue_id=i.id WHERE i.id=? GROUP BY i.id""", (issue_id,),
     ).fetchone()
     if row is None:
         return None
@@ -92,12 +99,15 @@ def summary(db, issue_id):
     result["description"] = db.execute("SELECT description FROM reports WHERE id=?", (row["representative_report_id"],)).fetchone()["description"]
     # Representative identity is an internal relationship, not municipal report access.
     result.pop("representative_report_id")
+    order = db.execute('SELECT team,version FROM work_orders WHERE issue_id=?',(issue_id,)).fetchone()
+    result['work_order'] = dict(order) if order else None
+    result['pending_repair'] = bool(db.execute("SELECT 1 FROM repair_evidence WHERE issue_id=? AND state='pending'",(issue_id,)).fetchone())
     return result
 
 
 def nearby_reports(db, report):
     rows = db.execute("""SELECT r.* FROM reports r JOIN issues i ON i.id=r.issue_id
-        WHERE r.id<>? AND r.issue_type=? AND r.verification_status='supported'
+        WHERE r.id<>? AND r.archived_at IS NULL AND r.issue_type=? AND r.verification_status='supported'
         AND i.status IN ('open','in_progress') AND r.created_at>=? ORDER BY r.id DESC""",
         (report['id'], report['issue_type'], report['created_at'] - 30 * 86400)).fetchall()
     return [r for r in rows if distance_metres(report['latitude'], report['longitude'], r['latitude'], r['longitude']) <= 30]
@@ -109,7 +119,7 @@ def apply_automatic_grouping(db, report_id, visual_matches, visual_enabled=False
     old_id = report['issue_id']
     nearby = nearby_reports(db, report)
     valid = []
-    copies = db.execute('SELECT latitude,longitude FROM reports WHERE id<>? AND image_sha256=?',
+    copies = db.execute('SELECT latitude,longitude FROM reports WHERE id<>? AND archived_at IS NULL AND image_sha256=?',
                         (report_id, report['image_sha256'])).fetchall()
     far_copy = any(distance_metres(report['latitude'], report['longitude'], r['latitude'], r['longitude']) > 30 for r in copies)
     for other in nearby:

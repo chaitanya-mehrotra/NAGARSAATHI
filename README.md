@@ -1,14 +1,14 @@
-# NAGARSAATHI — Chaitanya UI
+# NAGARSAATHI — Collection (27/10)
 
-This is the latest `chaitanya's-UI` interface with the combined YOLO11n pothole/waterlogging model. It starts from commit `a07610eebfbc406fabcac09ec5734622c8e79046`.
+Branch **`Collection-27-10`** combines selected main-branch features with Chaitanya's working UI, combined YOLO11n model and separate admin-PC worker. Read **[COLLECTION_27_10.md](COLLECTION_27_10.md)** for the current feature comparison, startup instructions, new APIs, validation and limitations. Both original branches are preserved.
 
 The current application uses React/Leaflet, FastAPI, SQLite, local citizen/admin accounts and private photo storage. It does not use the earlier TypeScript/PostGIS demo, its background worker, or synthetic demo accounts. The older Supabase migration is retained only as historical source.
 
-Duplicate grouping and report/reporter counts are documented in [DUPLICATE_GROUPING.md](DUPLICATE_GROUPING.md). Platform admins retain every individual submission; separately provisioned Nagar Nigam accounts see only forwarded consolidated issues. Priority scoring is deferred.
+The API immediately stores submissions and queues work for the admin PC. Supported consolidated issues publish automatically, with explainable demand/age priority. Admins retain every individual report; Nagar Nigam sees only published consolidated issues. Collection adds audited archive/restore, repair-team assignments, private repair photos, independent repair approval, staff activity history and optional verified Google citizen sign-in. Duplicate reports remain linked and counted.
 
-For step-by-step startup, account creation, report checking and expected outputs, read [RUN_AND_TEST_PROJECT.md](RUN_AND_TEST_PROJECT.md).
+For step-by-step startup, account creation, report checking and expected outputs, read [COLLECTION_27_10.md](COLLECTION_27_10.md). Earlier plans and guides describe historical prototypes.
 
-## Run the complete application
+## Run the UI and intake API in Docker
 
 With Docker Desktop running, execute from this folder:
 
@@ -16,7 +16,7 @@ With Docker Desktop running, execute from this folder:
 docker compose up -d --build --wait
 ```
 
-Open http://127.0.0.1:5180 and register an account. The container contains the frontend, API and model. Its named volume preserves the database and uploaded photos across ordinary stops and restarts. Stop it with `docker compose stop`.
+Open http://127.0.0.1:5180 and register an account. The container serves the frontend/API and stores data in a persistent volume. **Inference still runs in the separate PC worker**, configured for `http://127.0.0.1:5180/api` and the matching worker credential. Stop the container with `docker compose stop`. Docker's database and the development database are separate; see the Collection guide before switching modes.
 
 ## Public deployment
 
@@ -32,7 +32,7 @@ AI findings assist review. Missing detections or model failures never reject a s
 
 ## Development
 
-Use Python 3.13, Node 22+, and a project-local virtual environment. Install `backend/requirements.txt` with CPU PyTorch support and run `npm ci`. Copy `.env.example` to `.env`. Start the backend with `uvicorn backend.main:app --host 127.0.0.1 --port 8002` and the frontend with `npm run dev` (port 5174).
+Use Python 3.13, Node 22+, and a project-local virtual environment. Install `backend/requirements.txt` with CPU PyTorch support and run `npm ci`. For a fresh clone copy `.env.example` to `.env` and run `python -m backend.configure_worker` once; reuse existing configuration on an existing installation. Start the API with `uvicorn backend.main:app --host 127.0.0.1 --port 8002`, the worker with `python -m backend.pc_worker`, and the frontend with `npm run dev -- --port 5174 --strictPort`, in three separate terminals.
 
 Checks: `python -m unittest discover -s backend -p "test_*.py" -v`, `npm test`, and `npm run build`.
 

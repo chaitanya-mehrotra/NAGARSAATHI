@@ -1,6 +1,6 @@
 # Automated processing API contract — Person 2 handoff
 
-Baseline: `TEAM_TASKS_AND_PROMPTS.md`, authorized by the user on 26 October 2026. No frontend files are changed by this backend branch. API paths below are relative to the configured base; development uses port 8002, bundled Docker uses `/api`.
+Baseline: `TEAM_TASKS_AND_PROMPTS.md`, authorized by the user on 26 October 2026. Frontend integration is complete on Collection-27-10. API paths below are relative to the configured base; development uses port 8002, bundled Docker uses `/api`. See [COLLECTION_27_10.md](../COLLECTION_27_10.md) for archive, assignment, repair evidence and optional Google endpoints.
 
 This supersedes old startup guides that describe inline YOLO and citizen photo previews. Person 2 must remove the old Check Photo/model widgets; the server denies citizen access regardless of whether those widgets remain visible.
 

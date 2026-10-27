@@ -1,6 +1,6 @@
 # Backend and admin-PC processing
 
-This branch implements Person 1's backend scope. Citizen/admin/Nigam frontend changes belong to Person 2; `src/` is unchanged. The user approved `TEAM_TASKS_AND_PROMPTS.md` as the shared API baseline on 26 October 2026. Start with [API_CONTRACT.md](API_CONTRACT.md) for integration details and examples.
+Backend and frontend role workflows are now integrated. Collection adds selected moderation and repair-work features from main; see [COLLECTION_27_10.md](../COLLECTION_27_10.md) for current startup instructions and the feature comparison. The original shared contract was approved on 26 October 2026.
 
 ## What runs where
 
@@ -20,7 +20,7 @@ The separate worker loads the existing combined checkpoint once on the PC. There
 From `D:\nagarsaathi-model\integrations\NAGARSAATHI-chaitanya-ui`:
 
 ```cmd
-git switch feature/automated-processing
+git switch Collection-27-10
 .venv\Scripts\python.exe -m backend.configure_worker
 ```
 
@@ -44,7 +44,7 @@ Terminal C — frontend stays the separately owned Chaitanya UI:
 npm run dev -- --port 5174 --strictPort
 ```
 
-If a server already owns the port, stop that instance before restarting it. Existing frontend widgets are not proof of the new role flow: citizen preview is denied and model evidence is filtered by the backend. Person 2 must integrate the new contract before a complete user-facing demonstration.
+If a server already owns the port, stop that instance before restarting it. The integrated citizen workflow submits without preview; the server also denies preview access and filters model evidence.
 
 For one queued job rather than continuous polling:
 

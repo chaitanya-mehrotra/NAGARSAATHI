@@ -25,7 +25,7 @@ def connect():
 def init_db():
     with connect() as db:
         existing_columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
-        if existing_columns and ("issue_id" not in existing_columns or "verification_status" not in existing_columns):
+        if existing_columns and ("issue_id" not in existing_columns or "verification_status" not in existing_columns or "archived_at" not in existing_columns):
             backups = DATA_DIR / "backups"
             backups.mkdir(exist_ok=True)
             with closing(sqlite3.connect(backups / f"before-issue-grouping-{time.time_ns()}.db")) as backup:
@@ -116,6 +116,47 @@ def init_db():
             worker_id TEXT PRIMARY KEY,
             last_seen INTEGER NOT NULL
         );
+        CREATE TABLE IF NOT EXISTS moderation_events (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_id INTEGER NOT NULL REFERENCES reports(id),
+            actor_id INTEGER NOT NULL REFERENCES users(id),
+            action TEXT NOT NULL,
+            reason TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS google_identities (
+            subject TEXT PRIMARY KEY,
+            user_id INTEGER UNIQUE NOT NULL REFERENCES users(id)
+        );
+        CREATE TABLE IF NOT EXISTS google_challenges (
+            nonce_hash TEXT PRIMARY KEY,
+            expires_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS work_orders (
+            issue_id INTEGER PRIMARY KEY REFERENCES issues(id),
+            assigned_to INTEGER NOT NULL REFERENCES users(id),
+            assigned_by INTEGER NOT NULL REFERENCES users(id),
+            team TEXT NOT NULL,
+            note TEXT NOT NULL,
+            version INTEGER NOT NULL DEFAULT 1,
+            updated_at INTEGER NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS repair_evidence (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            issue_id INTEGER NOT NULL REFERENCES issues(id),
+            submitted_by INTEGER NOT NULL REFERENCES users(id),
+            note TEXT NOT NULL,
+            photo_name TEXT NOT NULL,
+            image_sha256 TEXT NOT NULL,
+            membership_digest TEXT NOT NULL,
+            state TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by INTEGER REFERENCES users(id),
+            review_note TEXT,
+            submitted_at INTEGER NOT NULL,
+            reviewed_at INTEGER,
+            request_key TEXT NOT NULL,
+            UNIQUE(submitted_by, request_key)
+        );
         """)
         # Additive migration: preserve all existing accounts, reports and photos.
         columns = {r["name"] for r in db.execute("PRAGMA table_info(reports)")}
@@ -131,9 +172,13 @@ def init_db():
             "image_width": "INTEGER",
             "image_height": "INTEGER",
             "processing_revision": "INTEGER NOT NULL DEFAULT 0",
+            "archived_at": "INTEGER",
+            "archived_by": "INTEGER REFERENCES users(id)",
+            "archive_reason": "TEXT",
         }.items():
             if name not in columns:
                 db.execute(f"ALTER TABLE reports ADD COLUMN {name} {declaration}")
+        db.execute("CREATE INDEX IF NOT EXISTS reports_archive ON reports(archived_at, id)")
         db.execute("CREATE INDEX IF NOT EXISTS report_issue ON reports(issue_id)")
         db.execute("CREATE UNIQUE INDEX IF NOT EXISTS report_submission ON reports(user_id, submission_key) WHERE submission_key IS NOT NULL")
         issue_columns = {r['name'] for r in db.execute('PRAGMA table_info(issues)')}

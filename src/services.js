@@ -64,7 +64,7 @@ export const submit = (form, key, signal) => {
 };
 export async function photoBlob(path, signal) {
   // Only authenticated API paths, never tokens in URLs, arbitrary origins or signed links.
-  if (!/^\/(reports|issues)\/[a-zA-Z0-9-]+\/photo$/.test(path)) throw new Error('Invalid photo path');
+  if (!/^\/(reports|issues)\/[a-zA-Z0-9-]+(?:\/repairs\/[0-9]+)?\/photo$/.test(path)) throw new Error('Invalid photo path');
   const token = getStoredToken(), version = revision;
   const response = await fetch(base + path, { signal, headers: { Authorization: `Bearer ${token}` } });
   if (version !== revision || token !== getStoredToken()) throw new DOMException('Session changed', 'AbortError');

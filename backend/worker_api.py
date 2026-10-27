@@ -70,7 +70,7 @@ def claim_job(body: Claim):
                        (state, now, 'lease_expired', now, old['id']))
             if state == 'failed':
                 db.execute("UPDATE reports SET analysis_status='failed',verification_status='needs_review',verification_reason='Processing needs administrator attention; your report is retained' WHERE id=?", (old['report_id'],))
-        job = db.execute("SELECT * FROM analysis_jobs WHERE state='queued' AND available_at<=? ORDER BY id LIMIT 1", (now,)).fetchone()
+        job = db.execute("SELECT * FROM analysis_jobs WHERE state='queued' AND available_at<=? AND EXISTS(SELECT 1 FROM reports r WHERE r.id=analysis_jobs.report_id AND r.archived_at IS NULL) ORDER BY id LIMIT 1", (now,)).fetchone()
         if job is None:
             return {'job': None}
         report = db.execute('SELECT * FROM reports WHERE id=?', (job['report_id'],)).fetchone()
@@ -116,6 +116,8 @@ def input_response(job_id, lease_token, report_id=None):
         if report_id is not None and report_id not in json.loads(job['candidate_ids']):
             raise HTTPException(403, 'Photo is outside the claimed job')
         row = db.execute('SELECT photo_name FROM reports WHERE id=?', (report_id or job['report_id'],)).fetchone()
+        if db.execute('SELECT archived_at FROM reports WHERE id=?',(report_id or job['report_id'],)).fetchone()['archived_at'] is not None:
+            raise HTTPException(409, 'Report was archived during processing')
     path = reports.DATA_DIR / 'photos' / row['photo_name']
     if not path.is_file():
         raise HTTPException(404, 'Input unavailable')
@@ -229,7 +231,7 @@ def failure(job_id: int, body: Failure):
 def processing_health(user: dict = Depends(admin_user)):
     now = int(time.time())
     with connect() as db:
-        counts = {s: db.execute('SELECT COUNT(*) FROM analysis_jobs WHERE state=?', (s,)).fetchone()[0]
+        counts = {s: db.execute('SELECT COUNT(*) FROM analysis_jobs j JOIN reports r ON r.id=j.report_id WHERE r.archived_at IS NULL AND j.state=?', (s,)).fetchone()[0]
                   for s in ('queued', 'processing', 'completed', 'failed')}
         oldest = db.execute("SELECT MIN(available_at) FROM analysis_jobs WHERE state='queued'").fetchone()[0]
         return {'queue': counts, 'oldest_wait_seconds': max(0, now - oldest) if oldest else 0,
@@ -241,16 +243,19 @@ def processing_health(user: dict = Depends(admin_user)):
 @router.get('/processing/exceptions')
 def exceptions(limit: int = Query(40, ge=1, le=100), offset: int = Query(0, ge=0), user: dict = Depends(admin_user)):
     with connect() as db:
-        rows = db.execute("SELECT * FROM reports WHERE verification_status='needs_review' ORDER BY id LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+        rows = db.execute("SELECT * FROM reports WHERE archived_at IS NULL AND verification_status='needs_review' ORDER BY id LIMIT ? OFFSET ?", (limit, offset)).fetchall()
         return {'items': [reports.serialize(r, db, True) for r in rows],
-                'total': db.execute("SELECT COUNT(*) FROM reports WHERE verification_status='needs_review'").fetchone()[0]}
+                'total': db.execute("SELECT COUNT(*) FROM reports WHERE archived_at IS NULL AND verification_status='needs_review'").fetchone()[0]}
 
 
 @router.post('/processing/reports/{report_id}/retry')
+@router.post('/reports/{report_id}/retry')
 def retry(report_id: int, user: dict = Depends(admin_user)):
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         report = reports.accessible_report(db, report_id, user)
+        if report['archived_at'] is not None:
+            raise HTTPException(409, 'Restore the report before retrying')
         job = db.execute('SELECT * FROM analysis_jobs WHERE report_id=?', (report_id,)).fetchone()
         if report['status'] in ('resolved', 'rejected') or (job and job['state'] in ('queued', 'processing')):
             raise HTTPException(409, 'Report is closed or already awaiting processing')
@@ -269,12 +274,15 @@ class EvidenceReview(BaseModel):
 
 
 @router.patch('/processing/reports/{report_id}/review')
+@router.patch('/reports/{report_id}/review')
 def review_evidence(report_id: int, body: EvidenceReview, user: dict = Depends(admin_user)):
     if not body.reason.strip():
         raise HTTPException(400, 'Explain the review decision')
     with connect() as db:
         db.execute('BEGIN IMMEDIATE')
         report = reports.accessible_report(db, report_id, user)
+        if report['archived_at'] is not None:
+            raise HTTPException(409, 'Restore the report before reviewing its evidence')
         if not report['issue_id']:
             from backend.grouping import new_issue
             issue_id = new_issue(db, report)

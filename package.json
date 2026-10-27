@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite --host 127.0.0.1",
     "build": "vite build",
-    "test": "node --test src/validation.test.js"
+    "test": "node --test src/validation.test.js",
+    "test:browser": "node --test src/workflows.browser.test.mjs"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.57.4",
