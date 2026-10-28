@@ -16,11 +16,13 @@ def demo_id(value: str) -> UUID:
 
 def require_local_demo(settings: Settings) -> None:
     url = make_url(settings.database_url)
-    if settings.app_mode not in {"demo", "test"} or url.host not in {
-        "localhost",
-        "127.0.0.1",
-        "db",
-    }:
+    if settings.app_mode not in {"demo", "test"}:
+        raise ValueError("Demo seeding is restricted to local demo/test databases")
+    if settings.allow_hosted_demo_seed:
+        # Explicit opt-in for a hosted demo database (e.g. Supabase, whose database is "postgres").
+        # Still demo/test mode only, and never for a production configuration.
+        return
+    if url.host not in {"localhost", "127.0.0.1", "db"}:
         raise ValueError("Demo seeding is restricted to local demo/test databases")
     if not url.database or not url.database.endswith(("_demo", "_test")):
         raise ValueError("Demo/test database names must end in _demo or _test")

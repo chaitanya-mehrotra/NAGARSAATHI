@@ -1,15 +1,33 @@
 from sqlalchemy import Engine, create_engine
-from sqlalchemy.engine import make_url
+from sqlalchemy.engine import URL, make_url
 
 from app.settings import Settings
 
+HOSTED_SUFFIXES = (".supabase.com", ".supabase.co")
+
+
+def is_hosted(url: URL) -> bool:
+    return (url.host or "").endswith(HOSTED_SUFFIXES)
+
+
+def effective_url(settings: Settings) -> URL:
+    """The configured URL, with TLS required for hosted (Supabase) databases."""
+    url = make_url(settings.database_url)
+    if is_hosted(url) and "sslmode" not in url.query:
+        url = url.update_query_dict({"sslmode": "require"})
+    return url
+
 
 def create_database_engine(settings: Settings) -> Engine:
-    url = make_url(settings.database_url)
+    url = effective_url(settings)
     if url.get_backend_name() != "postgresql":
         raise ValueError("PostgreSQL/PostGIS is required; SQLite is not a spatial substitute")
+    hosted = is_hosted(url)
     return create_engine(
         url.set(drivername="postgresql+psycopg"),
         pool_pre_ping=True,
-        connect_args={"connect_timeout": 3},
+        pool_size=settings.db_pool_size,
+        max_overflow=settings.db_max_overflow,
+        pool_recycle=1800 if hosted else -1,
+        connect_args={"connect_timeout": 10 if hosted else 3},
     )

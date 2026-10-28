@@ -1,7 +1,7 @@
 from pathlib import Path
 from typing import Annotated, Literal, Self
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
@@ -18,6 +18,16 @@ class Settings(BaseSettings):
         "postgresql://nagarsaathi_demo:local_demo_only@127.0.0.1:55432/nagarsaathi_demo"
     )
     storage_root: Path = Path(".local/media")
+    # "local" keeps photos on disk; "supabase" stores them in a private Supabase Storage bucket.
+    storage_backend: Literal["local", "supabase"] = "local"
+    supabase_url: str = ""
+    supabase_service_role_key: SecretStr = SecretStr("")
+    supabase_storage_bucket: str = "complaint-photos"
+    db_pool_size: int = Field(default=5, ge=1, le=30)
+    db_max_overflow: int = Field(default=5, ge=0, le=30)
+    # Demo seeding normally refuses any database not named *_demo/_test on a local host. A hosted
+    # demo database (for example Supabase, always named "postgres") must opt in explicitly.
+    allow_hosted_demo_seed: bool = False
     config_file: Path = PROJECT_ROOT / "config/demo.yaml"
     cors_origins: Annotated[list[str], NoDecode] = [
         "http://localhost:5173",
@@ -69,6 +79,11 @@ class Settings(BaseSettings):
                 raise ValueError("Production requires OIDC issuer, audience and JWKS URL")
             if not (self.boundaries_reviewed and self.category_rules_reviewed):
                 raise ValueError("Production requires reviewed boundaries and category rules")
+        if self.storage_backend == "supabase":
+            if not self.supabase_url.startswith("https://"):
+                raise ValueError("Supabase storage needs SUPABASE_URL (https://<ref>.supabase.co)")
+            if not self.supabase_service_role_key.get_secret_value():
+                raise ValueError("Supabase storage needs SUPABASE_SERVICE_ROLE_KEY")
         if not self.storage_root.is_absolute():
             self.storage_root = PROJECT_ROOT / self.storage_root
         return self

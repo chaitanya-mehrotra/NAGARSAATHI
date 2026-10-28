@@ -11,10 +11,10 @@ from sqlalchemy import Engine
 from starlette.exceptions import HTTPException
 from starlette.responses import Response
 
-from app.adapters.local_media import LocalMedia
+from app.adapters.storage import build_media_storage
 from app.auth import MultiTokenVerifier, TokenVerifier
 from app.database import create_database_engine
-from app.health import check_database, check_storage
+from app.health import check_database, check_media_backend
 from app.routes.auth_routes import compat_router as auth_compat_router, router as auth_router
 from app.routes.complaints_routes import compat_router as complaints_compat_router, router as complaints_router
 from app.routes.intake import router
@@ -50,7 +50,7 @@ def create_app(
     application.state.settings = current
     application.state.engine = engine or create_database_engine(current)
     application.state.tokens = token_verifier or MultiTokenVerifier(current)
-    application.state.media_storage = LocalMedia(current.storage_root)
+    application.state.media_storage = build_media_storage(current)
     application.include_router(auth_router)
     application.include_router(auth_compat_router)
     application.include_router(complaints_router)
@@ -129,7 +129,7 @@ def create_app(
     def ready(response: Response) -> HealthResponse:
         checks = {
             "postgis": database_probe(current),
-            "storage": check_storage(current.storage_root),
+            "storage": check_media_backend(current, application.state.media_storage),
         }
         is_ready = all(checks.values())
         response.status_code = 200 if is_ready else 503

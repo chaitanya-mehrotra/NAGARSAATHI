@@ -7,7 +7,7 @@ from uuid import UUID, uuid4
 from fastapi import HTTPException
 from sqlalchemy import Connection, text
 
-from app.adapters.local_media import LocalMedia
+from app.adapters.storage import MediaStore
 from app.domain.geography import IssuePoint, assign_area
 from app.intake_schemas import Actor, MediaSummary, ReportDetail, ReportSubmission, UploadReceipt
 from app.jobs import enqueue
@@ -26,7 +26,7 @@ def upload_receipt(row: Any) -> UploadReceipt:
     )
 
 
-def verify_stored_media(storage: LocalMedia, row: Any) -> bytes:
+def verify_stored_media(storage: MediaStore, row: Any) -> bytes:
     try:
         original = storage.read(row["storage_key"])
         display = storage.read(row["derivative_key"])
@@ -121,7 +121,7 @@ def submit_report(
     submission: ReportSubmission,
     key: str,
     settings: Settings,
-    storage: LocalMedia,
+    storage: MediaStore,
 ) -> ReportDetail:
     digest = hashlib.sha256(
         json.dumps(

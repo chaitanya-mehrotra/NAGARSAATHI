@@ -17,7 +17,7 @@ from typing import Any
 from PIL import Image, ImageOps
 from sqlalchemy import Engine, text
 
-from app.adapters.local_media import LocalMedia
+from app.adapters.storage import build_media_storage
 from app.schemas import AcceptedLabel, ValidationRequest, ValidationResult
 from app.settings import PROJECT_ROOT, Settings
 
@@ -30,7 +30,7 @@ class YoloValidator:
     def __init__(self, settings: Settings, engine: Engine) -> None:
         self.settings = settings
         self.engine = engine
-        self.media = LocalMedia(settings.storage_root)
+        self.media = build_media_storage(settings)
         self.weights = _resolve(settings.yolo_model_path)
         self.metadata: dict[str, Any] = json.loads(
             _resolve(settings.yolo_metadata_path).read_text(encoding="utf-8")
