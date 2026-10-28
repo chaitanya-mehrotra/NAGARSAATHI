@@ -23,7 +23,13 @@ Run the complete platform without installing Python, Node.js, or PostgreSQL dire
 3. Open your browser:
    - **Web App & Citizen Portal:** [http://localhost:5173](http://localhost:5173)
    - **Interactive API Documentation:** [http://localhost:5173/docs](http://localhost:5173/docs)
-   - **Local Development Mailbox (Email Verification & Password Reset):** [http://localhost:9000](http://localhost:9000)
+   - **Local Development Mailbox:** [http://localhost:9000](http://localhost:9000)
+
+   The first build downloads PyTorch (CPU) for the photo-validation worker and takes several
+   minutes. Demo accounts are on by default (`APP_MODE=demo`). To enable Google sign-in, set
+   `GOOGLE_CLIENT_ID` in `.env` first (see [`docs/GOOGLE_SIGN_IN.md`](docs/GOOGLE_SIGN_IN.md)).
+   To run the API, worker and web app without Docker, see
+   [`docs/RUN_LOCALLY.md`](docs/RUN_LOCALLY.md).
 
 4. To stop the application:
    ```bash
@@ -49,7 +55,7 @@ Browser / Mobile Web
   │                                                │
   │                                                ▼
   │                                      [Background Worker]
-  │                                      - Validation Leases
+  │                                      - YOLO photo validation
   │                                      - Priority Engine
   │                                      - Duplicate Candidates
   │
@@ -64,14 +70,17 @@ Browser / Mobile Web
 - **Report vs. Issue Distinction:** Multiple citizen reports about the same pothole or garbage accumulation are safely linked to a shared repair issue with independent eligible-reporter counts.
 - **Explainable Priority Scoring:** Calculates weighted priority based on category severity, proximity to schools/hospitals/transit, urgency, and duplicate support.
 - **Admin & Moderation Lifecycle:** Dedicated admin dashboard with complaint triage, duplicate grouping/splitting, work orders, independent repair verification, and audited soft delete / restore.
-- **Human-Review Validation:** Complete pipeline works reliably out-of-the-box without requiring an NVIDIA GPU or external paid API keys.
+- **Photo Validation (YOLO11n):** A trained pothole/waterlogging detector runs on CPU in the worker (no GPU or paid API). A photo that does not match the chosen category, or in which nothing is detected, is flagged and held for human review; nothing is rejected automatically. The detector only knows potholes and waterlogging, so other categories always go to human review.
+- **Google Sign-In:** Verified Google ID tokens with a one-use server nonce; demo accounts exist only in demo/test mode.
 
 ---
 
 ## 4. Phase Delivery Tracking
 
 Detailed implementation milestones and architectural records are maintained in:
-- [`docs/BUILD_STATUS.md`](file:///docs/BUILD_STATUS.md): Current phase status and roadmap.
-- [`docs/DECISIONS.md`](file:///docs/DECISIONS.md): Architectural decision records (ADRs).
-- [`docs/SCREEN_API_MAPPING.md`](file:///docs/SCREEN_API_MAPPING.md): Detailed screen-to-API route specifications.
-- [`docs/PERSISTENCE_POLICY.md`](file:///docs/PERSISTENCE_POLICY.md): Data preservation and volume retention policy.
+- [`docs/BUILD_STATUS.md`](docs/BUILD_STATUS.md): Current phase status and roadmap.
+- [`docs/DECISIONS.md`](docs/DECISIONS.md): Architectural decision records (ADRs).
+- [`docs/SCREEN_API_MAPPING.md`](docs/SCREEN_API_MAPPING.md): Detailed screen-to-API route specifications.
+- [`docs/PERSISTENCE_POLICY.md`](docs/PERSISTENCE_POLICY.md): Data preservation and volume retention policy.
+- [`docs/RUN_LOCALLY.md`](docs/RUN_LOCALLY.md): Running and testing without Docker for the app.
+- [`docs/GOOGLE_SIGN_IN.md`](docs/GOOGLE_SIGN_IN.md): Setting up Google sign-in.

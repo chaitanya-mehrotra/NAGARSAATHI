@@ -162,6 +162,7 @@ export function App() {
   const isNigam = user?.role === "nigam" || isAdmin;
   const [authModal, setAuthModal] = useState<boolean>(false);
   const [authTab, setAuthTab] = useState<"login" | "demo">("login");
+  const [gsiAttempt, setGsiAttempt] = useState(0);
   const [authOptions, setAuthOptions] = useState<{ google_client_id: string | null; demo_enabled: boolean }>({
     google_client_id: null,
     demo_enabled: false,
@@ -311,12 +312,17 @@ export function App() {
   // Google Identity Services (GSI) API integration
   useEffect(() => {
     if (authModal && authTab === "login" && authOptions.google_client_id) {
-      const initGsi = () => {
+      let cancelled = false;
+      const initGsi = async () => {
         const gsi = (window as any).google?.accounts?.id;
         if (gsi) {
           try {
+            // One-use server nonce: the Google token must carry it back to be accepted.
+            const { nonce } = await request("/api/v1/auth/google/challenge", { method: "POST" });
+            if (cancelled) return;
             gsi.initialize({
               client_id: authOptions.google_client_id,
+              nonce,
               callback: handleGoogleCredentialResponse,
             });
             const slot = document.getElementById("gsi-button-slot");
@@ -337,9 +343,12 @@ export function App() {
         }
       };
       const t = setTimeout(initGsi, 120);
-      return () => clearTimeout(t);
+      return () => {
+        cancelled = true;
+        clearTimeout(t);
+      };
     }
-  }, [authModal, authTab, authOptions.google_client_id]);
+  }, [authModal, authTab, authOptions.google_client_id, gsiAttempt]);
 
   async function handleGoogleCredentialResponse(response: any) {
     if (!response?.credential) return;
@@ -355,6 +364,7 @@ export function App() {
       setAuthError(err.message || "Google Sign-In failed");
     } finally {
       setAuthLoading(false);
+      setGsiAttempt((n) => n + 1); // the used nonce is spent; fetch a new one
     }
   }
 

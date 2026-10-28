@@ -298,3 +298,28 @@ def test_fixture_adapter_production_guard(validation_api):
     _, _, settings = validation_api
     with pytest.raises(ValueError, match="forbidden"):
         FixtureValidator(settings.model_copy(update={"app_mode": "production"}))
+
+
+def test_human_decision_clears_automatic_flag_but_keeping_in_review_does_not(validation_api):
+    client, engine, settings = validation_api
+    conflicting = [{"label": "garbage", "confidence": 0.8}]
+    flagged = []
+    for _ in range(2):
+        media = upload(client, content=photo_bytes((10 + len(flagged), 8)))
+        report = submit(client, body(media)).json()
+        process_once(engine, fixture_adapter(engine, settings, media, "accepted", conflicting))
+        current = report_response(client, report["id"])
+        assert current["is_suspicious"] is True
+        flagged.append(current)
+    keep, accept = flagged
+    url = "/api/v1/reviews/{}/decision"
+    kept = client.post(
+        url.format(keep["id"]),
+        json=decision(keep, decision="needs_review"),
+        headers=auth("demo-reviewer"),
+    )
+    assert kept.status_code == 200 and kept.json()["is_suspicious"] is True
+    accepted = client.post(
+        url.format(accept["id"]), json=decision(accept), headers=auth("demo-reviewer")
+    )
+    assert accepted.status_code == 200 and accepted.json()["is_suspicious"] is False

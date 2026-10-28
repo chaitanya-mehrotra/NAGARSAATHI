@@ -1,6 +1,6 @@
 # NAGARSAATHI V2 — Build Status & Roadmap Tracker
 
-**Updated:** 26 October 2026  
+**Updated:** 28 October 2026  
 **Target:** Unified production-grade civic complaint & prioritisation platform with modernized UI and self-service citizen + admin lifecycle.  
 **Constraint:** Strict read-only on original repository (`../Civic AI/nagarsaathi`). All new code, configuration, and artifacts created exclusively within `V2/`.
 
@@ -17,7 +17,7 @@
 | **Phase 4** | UI & Leaflet Integration (Modular React, Style System, Maps) | **COMPLETED** | Chaitanya UI ported into typed components, Leaflet interactive map, audit views |
 | **Phase 5** | Production Readiness & Data Retention | **PLANNED** | Scheduled cleanup runbook, secret management, backup & restore drill |
 | **Phase 6** | Release Verification & Acceptance Tests | **PLANNED** | Full test matrix execution, Playwright journeys, cross-platform validation |
-| **Phase 7** | Optional Future YOLOv8n / Gemini Verification | **DEFERRED** | Pluggable vision validation adapter (no GPU required for initial V2 release) |
+| **Phase 7** | YOLO photo validation | **COMPLETED (local)** | `YoloValidator` runs the trained YOLO11n model on CPU; mismatches and empty detections are flagged for human review. Tested locally with synthetic and real photos; not yet exercised in a deployed environment |
 | **Phase 8** | PWA & Native App Readiness | **DEFERRED** | Offline draft contract, background sync readiness |
 
 ---
@@ -51,11 +51,12 @@
 - [x] Added Alembic migration `0011_suspicious_and_traffic_weights.py`:
   - Added `is_suspicious` (boolean) and `suspicious_reason` (text) to `reports` table.
   - Added `traffic_weight` (double precision) to `areas` table with Bengaluru high-congestion zone weighting (1.25x for Silk Board / South Central, 1.15x for Koramangala / North Central & Northeast, 1.15x for HSR / Southeast).
-- [x] Implemented exclusive Google Sign-In:
-  - Created `/api/v1/auth/google` in `routes/auth_routes.py` verifying Google credentials, auto-provisioning citizen accounts locked to `google:{sub}`, and issuing signed JWT sessions.
-  - Removed traditional email/password registration to prevent credential stuffing and fake citizen accounts.
-- [x] Implemented Model Validation Suspicious Mismatch Rule in `domain/validation.py` and `jobs.py`:
-  - If visual detector category contradicts the citizen's claimed category (or model confidence is low / contradictory), the complaint is flagged with `is_suspicious = true` and `suspicious_reason = "Model detection mismatch..."`.
+- [x] Implemented Google Sign-In (hardened 28 October 2026):
+  - `/api/v1/auth/google` accepts only a Google-signed ID token. The `google-auth` library verifies signature, audience, issuer, expiry and verified email, and a one-use server nonce (`/auth/google/challenge`, migration 0012) prevents replay. Earlier versions decoded the token without verifying it and accepted a bare email; both were removed.
+  - Citizen accounts are auto-provisioned as `google:{sub}`. Google can never sign in to a staff account.
+  - Traditional email/password registration does not exist.
+- [x] Implemented the validation mismatch flag in `domain/validation.py` and `jobs.py`:
+  - If the detected category contradicts the claimed category, or the detector finds no pothole or waterlogging, the report is flagged (`is_suspicious = true`, with `suspicious_reason`) and held for human review. It is never auto-rejected. A human accept/reject decision clears the flag. Flagged reports are not admitted to the real priority engine until a human decides.
   - Exposed `is_suspicious` and `suspicious_reason` in `ReportDetail` and complaints list responses.
 - [x] Implemented Bengaluru Traffic-Heavy Zone Prioritisation in `domain/scoring.py` and `domain/priority.py`:
   - Applied `zone_traffic_weight` multipliers to base priority scores, capped at 100.
@@ -77,12 +78,23 @@
 - [x] **Faithful Chaitanya UI Restoration:**
   - Removed conflicting Tailwind CSS preflight to preserve Chaitanya's exact layout, fonts, cards, and modal drawer.
   - Interactive Leaflet street map on the left and recent complaints list on the right.
-- [x] **Demo Admin & Demo Citizen Accounts:**
-  - Added one-click Demo Admin (`admin@nagarsaathi.gov.in`) with review/moderation permissions and Demo Citizen (`citizen@gmail.com`).
-  - Added `/api/v1/auth/demo-login` and `/api/v1/auth/login` endpoints with automatic role assignment.
+- [x] **Demo Admin & Demo Citizen Accounts (demo/test mode only):**
+  - One-click Demo Admin (`admin@nagarsaathi.gov.in`) and Demo Citizen (`citizen@gmail.com`).
+  - `/api/v1/auth/demo-login` and `/api/v1/auth/login` return 404/401 unless `APP_MODE` is `demo` or `test`; roles are never inferred from an email address.
 - [x] **Role-Based Admin Protection:**
   - Restricted complaint review (status, priority), soft deletion, and duplicate management strictly to `admin` / `nigam` accounts.
   - Citizen accounts have clean, read-only receipt tracking without moderation controls.
 - [x] **Deduplication: Delete All Duplicates & Keep Only 1:**
   - Added backend endpoint `POST /api/v1/reports/{report_id}/deduplicate-keep-one`.
   - Added "🗑️ Delete All Duplicates (Keep Only This Report)" button in the deduplication drawer with transactional soft-deletion, audit logging, and issue count refresh.
+
+---
+
+## 3. Update 28 October 2026
+
+- Runs locally end to end (database in Docker; API, worker, web on the host). See `docs/RUN_LOCALLY.md`.
+- `YoloValidator` added (`VALIDATION_PROVIDER=yolo`); weights in `models/`. The browser no longer fakes a verdict.
+- Categories added: `waterlogging`, `electric_pole_fallen`, `both`. The detector supports pothole, waterlogging and both; other categories are always sent to human review.
+- Fixed: health check URL, demo admin role insert, complaints query, dashboard counters, evidence photo loading, upload-complete call, unsupported `seriousness` field, missing dependencies, Docker images and compose defaults.
+- Strict `OIDCTokens` verifier restored. Any signed-in user may file reports (role does not restrict reporting).
+- **Open:** move database and photo storage to Supabase; deployment; verify the detector on real waterlogging photos; a trained model for categories beyond pothole/waterlogging.

@@ -1,5 +1,7 @@
 """Authentication routes for NAGARSAATHI V2 — Exclusively Google Sign-In & Session Management."""
 
+import hashlib
+import secrets
 from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID, uuid4
@@ -79,7 +81,35 @@ def verify_google_credential(credential: str, audience: str) -> dict[str, str]:
         raise HTTPException(401, "A verified Google email address is required")
     email = normalize_email(claims["email"])
     name = str(claims.get("name") or email.split("@")[0]).strip()[:100] or "Citizen"
-    return {"email": email, "name": name, "sub": f"google:{claims['sub']}"}
+    return {
+        "email": email,
+        "name": name,
+        "sub": f"google:{claims['sub']}",
+        "nonce": str(claims.get("nonce") or ""),
+    }
+
+
+def nonce_hash(nonce: str) -> str:
+    return hashlib.sha256(nonce.encode("utf-8")).hexdigest()
+
+
+@router.post("/auth/google/challenge")
+@compat_router.post("/auth/google/challenge")
+def google_challenge(request: Request) -> dict[str, str]:
+    """Issue a one-use nonce (valid 5 minutes) that the Google ID token must carry back."""
+    if not request.app.state.settings.google_client_id:
+        raise HTTPException(503, "Google sign-in is not configured (set GOOGLE_CLIENT_ID)")
+    nonce = secrets.token_urlsafe(32)
+    with request.app.state.engine.begin() as connection:
+        connection.execute(text("DELETE FROM google_challenges WHERE expires_at<=now()"))
+        connection.execute(
+            text(
+                "INSERT INTO google_challenges (nonce_hash, expires_at) "
+                "VALUES (:hash, now() + interval '5 minutes')"
+            ),
+            {"hash": nonce_hash(nonce)},
+        )
+    return {"nonce": nonce}
 
 
 @router.get("/auth/options")
@@ -105,7 +135,19 @@ def google_sign_in(body: GoogleAuthRequest, request: Request) -> AuthResponse:
     name = google_data["name"]
     auth_sub = google_data["sub"]
 
+    if not google_data["nonce"]:
+        raise HTTPException(401, "Google sign-in challenge is missing")
+
     with request.app.state.engine.begin() as connection:
+        consumed = connection.execute(
+            text(
+                "DELETE FROM google_challenges WHERE nonce_hash=:hash AND expires_at>now() "
+                "RETURNING nonce_hash"
+            ),
+            {"hash": nonce_hash(google_data["nonce"])},
+        ).scalar_one_or_none()
+        if consumed is None:
+            raise HTTPException(401, "Google sign-in expired or was already used. Try again")
         user = connection.execute(
             text("""
                 SELECT id, auth_subject, display_name, email, COALESCE(role, 'citizen') as user_role, created_at, active

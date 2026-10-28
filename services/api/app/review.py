@@ -192,6 +192,7 @@ def decide(
           confirmed_point=CASE WHEN CAST(:lon AS double precision) IS NULL
           OR CAST(:lat AS double precision) IS NULL THEN NULL
           ELSE ST_SetSRID(ST_MakePoint(:lon,:lat),4326)::geography END,
+          is_suspicious=CASE WHEN :decision='needs_review' THEN is_suspicious ELSE false END,
           location_accuracy_m=:accuracy,updated_at=now() WHERE id=:id
     """),
         {

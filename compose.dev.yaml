@@ -24,15 +24,15 @@ services:
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
-      APP_MODE: development
+      APP_MODE: demo
       JWT_SECRET: local_dev_jwt_secret_must_change_in_prod_32chars
-      MEDIA_STORAGE_DIR: /app/.local/media
+      STORAGE_ROOT: /app/.local/media
       CORS_ORIGINS: http://localhost:5173,http://127.0.0.1:5173
     volumes:
       - ./services/api:/app/services/api
       - ./config:/app/config
       - v2_dev_media_data:/app/.local/media
-    command: ["uvicorn", "services.api.app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    command: ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000", "--reload"]
     ports:
       - "127.0.0.1:8000:8000"
     depends_on:

@@ -24,7 +24,7 @@ services:
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
-      APP_MODE: ${APP_MODE:-development}
+      APP_MODE: ${APP_MODE:-demo}
     command: ["alembic", "upgrade", "head"]
     depends_on:
       db:
@@ -37,9 +37,9 @@ services:
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
-      APP_MODE: ${APP_MODE:-development}
+      APP_MODE: ${APP_MODE:-demo}
       JWT_SECRET: ${JWT_SECRET:-local_dev_jwt_secret_must_change_in_prod_32chars}
-      MEDIA_STORAGE_DIR: /app/.local/media
+      STORAGE_ROOT: /app/.local/media
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
       SMTP_HOST: ${SMTP_HOST:-mailbox}
       SMTP_PORT: ${SMTP_PORT:-2500}
@@ -61,8 +61,10 @@ services:
       dockerfile: infrastructure/docker/worker.Dockerfile
     environment:
       DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
-      APP_MODE: ${APP_MODE:-development}
-      MEDIA_STORAGE_DIR: /app/.local/media
+      APP_MODE: ${APP_MODE:-demo}
+      STORAGE_ROOT: /app/.local/media
+      VALIDATION_PROVIDER: ${VALIDATION_PROVIDER:-yolo}
+      YOLO_DEVICE: ${YOLO_DEVICE:-cpu}
     volumes:
       - v2_media_data:/app/.local/media
     restart: unless-stopped
