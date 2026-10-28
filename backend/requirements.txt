@@ -1,2 +1,4 @@
 # Compatibility developer environment; production intake needs requirements-api.txt only.
 -r requirements-worker.txt
+pymongo
+python-dotenv
