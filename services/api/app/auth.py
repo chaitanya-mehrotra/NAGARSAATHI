@@ -56,6 +56,42 @@ class TokenVerifier(Protocol):
     def subject(self, token: str) -> str: ...
 
 
+class OIDCTokens:
+    """Strict OIDC verifier: signature, issuer, audience, expiry and a non-empty string subject.
+
+    Roles in the token are never trusted; authorization comes from the database. A JWKS outage
+    is a 503, never an authenticated request.
+    """
+
+    def __init__(self, settings: Settings, jwks: Any | None = None) -> None:
+        self.settings = settings
+        self.jwks = jwks or PyJWKClient(settings.oidc_jwks_url, timeout=3, lifespan=300)
+
+    def subject(self, token: str) -> str:
+        try:
+            if jwt.get_unverified_header(token).get("alg") not in {"RS256", "ES256"}:
+                raise HTTPException(401, "Invalid or expired authorization token")
+            key = self.jwks.get_signing_key_from_jwt(token).key
+            claims = jwt.decode(
+                token,
+                key,
+                algorithms=["RS256", "ES256"],
+                issuer=self.settings.oidc_issuer,
+                audience=self.settings.oidc_audience,
+                options={"require": ["exp", "iat", "iss", "aud", "sub"]},
+            )
+        except HTTPException:
+            raise
+        except jwt.PyJWKClientConnectionError as err:
+            raise HTTPException(503, "Identity provider is unavailable") from err
+        except jwt.PyJWTError as err:
+            raise HTTPException(401, "Invalid or expired authorization token") from err
+        sub = claims.get("sub")
+        if not isinstance(sub, str) or not sub:
+            raise HTTPException(401, "Invalid or expired authorization token")
+        return sub
+
+
 class MultiTokenVerifier:
     """Unified token verifier supporting local HS256 JWTs, OIDC, and demo fixtures."""
 
@@ -63,6 +99,7 @@ class MultiTokenVerifier:
         self.settings = settings
         self.jwt_secret = settings.jwt_secret
         self.demo_subjects: set[str] = set()
+        self.oidc = OIDCTokens(settings) if settings.oidc_jwks_url else None
 
         if settings.app_mode in {"demo", "test"}:
             try:
@@ -80,7 +117,15 @@ class MultiTokenVerifier:
         if self.demo_subjects and token in self.demo_subjects:
             return token
 
-        # 2. Try decoding as Local HS256 JWT
+        # 2. Asymmetric tokens belong to the configured OIDC provider only
+        try:
+            algorithm = jwt.get_unverified_header(token).get("alg")
+        except jwt.PyJWTError as err:
+            raise HTTPException(401, "Invalid or expired authorization token") from err
+        if algorithm in {"RS256", "ES256"} and self.oidc is not None:
+            return self.oidc.subject(token)
+
+        # 3. Local HS256 session token issued by this API
         try:
             claims = jwt.decode(
                 token,
@@ -88,35 +133,11 @@ class MultiTokenVerifier:
                 algorithms=["HS256"],
                 options={"require": ["exp", "sub"]},
             )
-            sub = claims.get("sub")
-            if isinstance(sub, str) and sub:
-                return sub
-        except (jwt.InvalidSignatureError, jwt.InvalidAlgorithmError):
-            pass  # Fall through to OIDC if configured
         except jwt.PyJWTError as err:
-            raise HTTPException(401, f"Invalid session token: {err}") from err
-
-        # 3. Try OIDC if configured
-        if getattr(self.settings, "oidc_jwks_url", None):
-            try:
-                jwks = PyJWKClient(self.settings.oidc_jwks_url, timeout=3, lifespan=300)
-                header = jwt.get_unverified_header(token)
-                if header.get("alg") in {"RS256", "ES256"}:
-                    key = jwks.get_signing_key_from_jwt(token).key
-                    claims = jwt.decode(
-                        token,
-                        key,
-                        algorithms=["RS256", "ES256"],
-                        issuer=self.settings.oidc_issuer,
-                        audience=self.settings.oidc_audience,
-                        options={"require": ["exp", "iat", "iss", "aud", "sub"]},
-                    )
-                    sub = claims.get("sub")
-                    if isinstance(sub, str) and sub:
-                        return sub
-            except Exception:
-                pass
-
+            raise HTTPException(401, "Invalid or expired authorization token") from err
+        sub = claims.get("sub")
+        if isinstance(sub, str) and sub:
+            return sub
         raise HTTPException(401, "Invalid or expired authorization token")
 
 

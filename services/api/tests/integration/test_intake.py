@@ -140,13 +140,14 @@ def test_authentication_and_role_escalation_rejected(api):
     assert client.get("/api/v1/me").status_code == 401
     assert client.get("/api/v1/me", headers=auth("made-up-admin")).status_code == 401
     assert client.get("/api/v1/me", headers=auth()).json()["grants"][0]["role"] == "citizen"
+    # Any signed-in user may file reports; the role is not an obstacle to reporting.
     assert (
         client.post(
             "/api/v1/uploads",
             content=photo_bytes(),
             headers={**auth("demo-reviewer"), "Content-Type": "image/png"},
         ).status_code
-        == 403
+        == 201
     )
     payload = body(upload(client))
     for extra in [
@@ -157,7 +158,8 @@ def test_authentication_and_role_escalation_rejected(api):
         {"priority": 100},
     ]:
         assert submit(client, {**payload, **extra}).status_code == 422
-    assert submit(client, payload, "demo-admin").status_code == 403
+    # Another user cannot attach someone else's upload, whatever their role.
+    assert submit(client, payload, "demo-admin").status_code == 404
 
 
 @pytest.mark.parametrize(

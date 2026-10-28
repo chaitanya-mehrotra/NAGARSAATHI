@@ -45,7 +45,7 @@ def test_production_rejects_demo_sources(auth: str, validator: str) -> None:
         )
 
 
-def test_production_cannot_start_before_adapters_are_implemented(tmp_path: Path) -> None:
+def test_production_api_starts_with_reviewed_config(tmp_path: Path) -> None:
     settings = Settings(
         _env_file=None,
         app_mode="production",
@@ -59,9 +59,9 @@ def test_production_cannot_start_before_adapters_are_implemented(tmp_path: Path)
         jwt_secret="x" * 48,
         storage_root=tmp_path,
     )
-    with pytest.raises(RuntimeError, match="not implemented"):
-        with TestClient(create_app(settings)):
-            pass
+    # The API starts with reviewed production config; the worker rollout gate is separate.
+    with TestClient(create_app(settings)) as client:
+        assert client.get("/api/v1/health/live").status_code == 200
 
 
 def test_error_contract_does_not_expose_internal_details(tmp_path: Path) -> None:

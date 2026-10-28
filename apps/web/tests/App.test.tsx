@@ -1,8 +1,30 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { App } from "../src/App";
+
+function reply(data: unknown) {
+  return {
+    ok: true,
+    status: 200,
+    headers: new Headers({ "content-type": "application/json" }),
+    json: async () => data,
+    text: async () => JSON.stringify(data),
+  };
+}
+
+/** Stub the API by path; anything unlisted answers an empty object. */
+function stubApi(routes: Record<string, unknown>) {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async (input: RequestInfo | URL) => {
+      const url = String(input);
+      const match = Object.keys(routes).find((path) => url.includes(path));
+      return reply(match ? routes[match] : {});
+    }),
+  );
+}
 
 function renderApp() {
   const client = new QueryClient({
@@ -17,45 +39,61 @@ function renderApp() {
   );
 }
 
-describe("pilot scaffold", () => {
-  it("renders categories from the API and marks the demo honestly", async () => {
-    vi.stubGlobal(
-      "fetch",
-      vi.fn().mockResolvedValue({
-        ok: true,
-        json: async () => ({
-          pilot: { service_areas: ["Southwest", "Northeast"] },
-          categories: [
-            {
-              code: "pothole",
-              label: "Pothole",
-              requires_manual_categorisation: false,
-            },
-          ],
-        }),
-      }),
-    );
+afterEach(() => {
+  vi.unstubAllGlobals();
+  localStorage.clear();
+});
+
+describe("dashboard", () => {
+  it("shows the API's real counts instead of the list total", async () => {
+    stubApi({
+      "/api/v1/auth/options": { google_client_id: null, demo_enabled: false },
+      "/api/v1/metrics": {
+        reports: { total: 6, admitted: 0, rejected: 0, pending: 6, suspicious: 4 },
+        issues: { total: 0, resolved: 0, active: 0 },
+        categories: { pothole: 3, waterlogging: 1 },
+      },
+      "/api/v1/complaints": { items: [], total: 0 },
+    });
     renderApp();
-    expect(await screen.findByText("Pothole")).toBeInTheDocument();
-    expect(screen.getByText("Development demo")).toBeInTheDocument();
-    expect(screen.getByText(/does not submit complaints/)).toBeInTheDocument();
-    expect(screen.getByText("Southwest")).toBeInTheDocument();
-    expect(
-      screen.queryByRole("button", { name: /submit/i }),
-    ).not.toBeInTheDocument();
+    const tile = (await screen.findByText("Pothole reports")).closest("button")!;
+    await vi.waitFor(() => expect(tile).toHaveTextContent("3"));
+    const waterlogging = screen.getByText("Waterlogging reports").closest("button")!;
+    expect(waterlogging).toHaveTextContent("1");
   });
 
-  it("keeps coverage and a retry action available when the API fails", async () => {
+  it("reports a backend failure instead of showing invented complaints", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     renderApp();
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /could not be loaded/,
-    );
-    expect(
-      screen.getByRole("button", { name: "Try again" }),
-    ).toBeInTheDocument();
-    expect(
-      screen.getByRole("heading", { name: "Southeast Bengaluru" }),
-    ).toBeInTheDocument();
+    const alerts = await screen.findAllByRole("alert");
+    expect(alerts.some((alert) => /offline/.test(alert.textContent ?? ""))).toBe(true);
+    expect(screen.queryByText(/Silk Board/)).not.toBeInTheDocument();
+  });
+});
+
+describe("sign-in dialog", () => {
+  async function openDialog() {
+    renderApp();
+    const [signIn] = await screen.findAllByRole("button", { name: /^Sign In$/ });
+    fireEvent.click(signIn);
+  }
+
+  it("offers demo accounts only when the server enables demo mode", async () => {
+    stubApi({
+      "/api/v1/auth/options": { google_client_id: "client.apps.googleusercontent.com", demo_enabled: true },
+      "/api/v1/complaints": { items: [], total: 0 },
+    });
+    await openDialog();
+    expect(await screen.findByRole("button", { name: "Demo Accounts" })).toBeInTheDocument();
+  });
+
+  it("hides demo accounts and says so when Google is not configured", async () => {
+    stubApi({
+      "/api/v1/auth/options": { google_client_id: null, demo_enabled: false },
+      "/api/v1/complaints": { items: [], total: 0 },
+    });
+    await openDialog();
+    expect(await screen.findByText(/Google sign-in is not configured/)).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Demo Accounts" })).not.toBeInTheDocument();
   });
 });
