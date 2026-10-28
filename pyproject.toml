@@ -12,7 +12,11 @@ dependencies = [
   "sqlalchemy>=2.0,<3", "geoalchemy2>=0.17,<1", "psycopg[binary]>=3.2,<4",
   "alembic>=1.15,<2", "pyyaml>=6,<7",
   "PyJWT[crypto]>=2.10,<3", "Pillow>=12,<13",
+  "email-validator>=2.2,<3", "google-auth>=2.35,<3", "requests>=2.32,<3", "python-multipart>=0.0.20",
 ]
+
+[project.optional-dependencies]
+ml = ["ultralytics>=8.3,<9", "numpy>=1.26"]
 
 [dependency-groups]
 dev = ["pytest>=8,<10", "httpx>=0.28,<1", "ruff>=0.11,<1", "mypy>=1.15,<2", "types-PyYAML>=6,<7"]

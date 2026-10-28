@@ -13,3 +13,7 @@ providers:
     sewage_overflow: sewage_overflow
     streetlight_failure: streetlight_failure
     other_civic_issue: other_civic_issue
+  nagarsaathi-yolo11n-v3:
+    pothole: pothole
+    waterlogging: waterlogging
+    both: both

@@ -4,6 +4,7 @@
 
 const TOKEN_KEY = "nagarsaathi_v2_token";
 const USER_KEY = "nagarsaathi_v2_user";
+const OFFLINE_DEMO = (import.meta as any).env?.VITE_OFFLINE_DEMO === "1";
 
 export interface StoredUser {
   id: string;
@@ -135,78 +136,6 @@ export interface YoloAnalysisResult {
   suspicious_reason: string;
   confidence_threshold: number;
   verification_verdict: string;
-}
-
-export function analyzePhotoWithYolo(
-  claimedCategory: string,
-  photoFileName: string = "",
-  forceMismatch: boolean = false
-): YoloAnalysisResult {
-  const model_version = "nagarsaathi-yolo11n-v3";
-  const model_sha256 = "748e47702e7fa7068ab64a9005cbefb02873e0190eff67496dbd2ef2a8f6a676";
-  const architecture = "YOLO11n (Road Defect Fine-Tuned)";
-  const confidence_threshold = 0.25;
-
-  const isForcedMismatch =
-    forceMismatch ||
-    photoFileName.toLowerCase().includes("mismatch") ||
-    photoFileName.toLowerCase().includes("fake");
-
-  let detections: YoloDetection[] = [];
-  let is_match = true;
-  let is_suspicious = false;
-  let suspicious_reason = "";
-  let verification_verdict = "Supported by image";
-
-  if (isForcedMismatch) {
-    if (claimedCategory === "pothole") {
-      detections = [
-        { class_name: "waterlogging", confidence: 0.88, bbox: [120, 150, 480, 420] },
-      ];
-    } else {
-      detections = [
-        { class_name: "pothole", confidence: 0.91, bbox: [80, 100, 350, 380] },
-      ];
-    }
-    is_match = false;
-    is_suspicious = true;
-    suspicious_reason = `Model detection mismatch: user claimed '${claimedCategory}' but fine-tuned YOLO11n detector found '${detections[0].class_name}' (${(detections[0].confidence * 100).toFixed(1)}% conf)`;
-    verification_verdict = "Possible mismatch";
-  } else if (claimedCategory === "pothole") {
-    detections = [
-      { class_name: "pothole", confidence: 0.89, bbox: [140, 200, 460, 480] },
-    ];
-    verification_verdict = "Supported by image";
-  } else if (claimedCategory === "waterlogging") {
-    detections = [
-      { class_name: "waterlogging", confidence: 0.92, bbox: [100, 180, 520, 510] },
-    ];
-    verification_verdict = "Supported by image";
-  } else if (claimedCategory === "both") {
-    detections = [
-      { class_name: "pothole", confidence: 0.87, bbox: [80, 220, 320, 450] },
-      { class_name: "waterlogging", confidence: 0.93, bbox: [280, 160, 580, 520] },
-    ];
-    verification_verdict = "Supported by image";
-  } else if (claimedCategory === "electric_pole_fallen") {
-    detections = [];
-    verification_verdict = "Life safety priority category - immediate municipal dispatch";
-  } else {
-    detections = [];
-    verification_verdict = "General civic defect category";
-  }
-
-  return {
-    model_version,
-    model_sha256,
-    architecture,
-    detections,
-    is_match,
-    is_suspicious,
-    suspicious_reason,
-    confidence_threshold,
-    verification_verdict,
-  };
 }
 
 // Local demo fallback dataset for Bengaluru pilot
@@ -429,7 +358,8 @@ export async function request(path: string, options: RequestInit = {}): Promise<
 
     return data;
   } catch (err: any) {
-    // If backend is still starting up or returning 502 / network error, provide instant local fallback
+    // Sample data is opt-in (VITE_OFFLINE_DEMO=1) so real backend failures are never hidden.
+    if (!OFFLINE_DEMO) throw err;
     if (path.includes("/api/v1/complaints") || path.includes("/complaints")) {
       if (options.method === "PATCH" && path.includes("/complaints/")) {
         const id = path.split("/").pop();
@@ -560,66 +490,31 @@ export async function request(path: string, options: RequestInit = {}): Promise<
   }
 }
 
-export async function loginWithGoogle(params: { credential?: string; email?: string; name?: string; sub?: string }): Promise<{ access_token: string; user: StoredUser }> {
-  let email = params.email;
-  let name = params.name;
-
-  if (params.credential) {
-    try {
-      const parts = params.credential.split(".");
-      if (parts.length >= 2) {
-        const payload = JSON.parse(decodeURIComponent(escape(atob(parts[1].replace(/-/g, "+").replace(/_/g, "/")))));
-        email = payload.email || email;
-        name = payload.name || payload.given_name || name;
-      }
-    } catch {
-      // Fallback
-    }
-  }
-
-  try {
-    const data = await request("/api/v1/auth/google", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...params, email, name }),
-    });
-    setSession(data.access_token, data.user);
-    return data;
-  } catch {
-    const finalEmail = email || "citizen.user@gmail.com";
-    const finalName = name || finalEmail.split("@")[0].replace(".", " ");
-    const fallbackUser: StoredUser = {
-      id: "google-" + crypto.randomUUID(),
-      name: finalName,
-      email: finalEmail,
-      role: "citizen",
-      created_at: new Date().toISOString(),
-    };
-    setSession("mock_google_jwt_" + Date.now(), fallbackUser);
-    return { access_token: "mock_google_jwt", user: fallbackUser };
-  }
+export async function loginWithGoogle(params: { credential: string }): Promise<{ access_token: string; user: StoredUser }> {
+  const data = await request("/api/v1/auth/google", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ credential: params.credential }),
+  });
+  setSession(data.access_token, data.user);
+  return data;
 }
 
 export async function loginWithDemo(accountType: "admin" | "citizen"): Promise<{ access_token: string; user: StoredUser }> {
+  const data = await request("/api/v1/auth/demo-login", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ account_type: accountType }),
+  });
+  setSession(data.access_token, data.user);
+  return data;
+}
+
+export async function getAuthOptions(): Promise<{ google_client_id: string | null; demo_enabled: boolean }> {
   try {
-    const data = await request("/api/v1/auth/demo-login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ account_type: accountType }),
-    });
-    setSession(data.access_token, data.user);
-    return data;
+    return await request("/api/v1/auth/options");
   } catch {
-    const isAdmin = accountType.toLowerCase() === "admin";
-    const fallbackUser: StoredUser = {
-      id: isAdmin ? "demo-admin-id" : "demo-citizen-id",
-      name: isAdmin ? "Nagar Saathi Administrator" : "Citizen Saathi",
-      email: isAdmin ? "admin@nagarsaathi.gov.in" : "citizen@gmail.com",
-      role: isAdmin ? "admin" : "citizen",
-      created_at: new Date().toISOString(),
-    };
-    setSession("demo_token_" + fallbackUser.role, fallbackUser);
-    return { access_token: "demo_token_" + fallbackUser.role, user: fallbackUser };
+    return { google_client_id: null, demo_enabled: false };
   }
 }
 
@@ -629,15 +524,6 @@ export async function deduplicateKeepOne(reportId: string, reason?: string): Pro
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ reason: reason || "Deduplication: removed redundant duplicate reports, retaining primary complaint" }),
   });
-}
-
-export async function login(email: string, password?: string): Promise<{ access_token: string; user: StoredUser }> {
-  const isAdm = email.toLowerCase().includes("admin");
-  return loginWithDemo(isAdm ? "admin" : "citizen");
-}
-
-export async function register(name: string, email: string, password?: string): Promise<{ access_token: string; user: StoredUser }> {
-  return loginWithGoogle({ email, name });
 }
 
 export async function logout(): Promise<void> {

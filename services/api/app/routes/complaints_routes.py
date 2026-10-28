@@ -222,7 +222,7 @@ def list_complaints(
                 r.suspicious_reason,
                 m.id as media_id,
                 u.display_name as citizen_name,
-                COALESCE(i.priority_score, 
+                COALESCE(ps.score, 
                     ROUND(
                         CAST(GREATEST(10.0, ((CASE 
                             -- Critical life safety & fallen electric poles
@@ -266,6 +266,7 @@ def list_complaints(
             LEFT JOIN media m ON m.report_id = r.id AND m.processing_state = 'ready'
             LEFT JOIN issue_report_links irl ON irl.report_id = r.id AND irl.active
             LEFT JOIN issues i ON i.id = irl.issue_id
+            LEFT JOIN priority_snapshots ps ON ps.id = i.current_priority_snapshot_id
             WHERE {where_clause}
             ORDER BY {order_clause}
             LIMIT :limit OFFSET :offset

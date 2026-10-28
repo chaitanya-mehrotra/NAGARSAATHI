@@ -4,7 +4,7 @@ services:
   db:
     image: postgis/postgis:16-3.4
     environment:
-      POSTGRES_DB: ${POSTGRES_DB:-nagarsaathi_v2}
+      POSTGRES_DB: ${POSTGRES_DB:-nagarsaathi_v2_demo}
       POSTGRES_USER: ${POSTGRES_USER:-nagarsaathi}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-nagarsaathi_secret_local}
     ports:
@@ -23,7 +23,7 @@ services:
       context: .
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
       APP_MODE: ${APP_MODE:-development}
     command: ["alembic", "upgrade", "head"]
     depends_on:
@@ -36,13 +36,14 @@ services:
       context: .
       dockerfile: infrastructure/docker/api.Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
       APP_MODE: ${APP_MODE:-development}
       JWT_SECRET: ${JWT_SECRET:-local_dev_jwt_secret_must_change_in_prod_32chars}
       MEDIA_STORAGE_DIR: /app/.local/media
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost,http://localhost:5173,http://127.0.0.1,http://127.0.0.1:5173}
       SMTP_HOST: ${SMTP_HOST:-mailbox}
       SMTP_PORT: ${SMTP_PORT:-2500}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
     ports:
       - "127.0.0.1:8000:8000"
     volumes:
@@ -59,7 +60,7 @@ services:
       context: .
       dockerfile: infrastructure/docker/worker.Dockerfile
     environment:
-      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2}
+      DATABASE_URL: postgresql+psycopg://${POSTGRES_USER:-nagarsaathi}:${POSTGRES_PASSWORD:-nagarsaathi_secret_local}@db:5432/${POSTGRES_DB:-nagarsaathi_v2_demo}
       APP_MODE: ${APP_MODE:-development}
       MEDIA_STORAGE_DIR: /app/.local/media
     volumes:

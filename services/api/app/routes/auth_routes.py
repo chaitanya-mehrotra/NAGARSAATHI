@@ -1,7 +1,6 @@
 """Authentication routes for NAGARSAATHI V2 — Exclusively Google Sign-In & Session Management."""
 
-from datetime import UTC, datetime
-import os
+from datetime import UTC, datetime, timedelta
 from typing import Annotated, Any
 from uuid import UUID, uuid4
 
@@ -36,10 +35,7 @@ CurrentActor = Annotated[Actor, Depends(authenticated)]
 
 
 class GoogleAuthRequest(BaseModel):
-    credential: str | None = None  # Google ID token from Google Identity Services
-    email: EmailStr | None = None  # Fallback for direct Google OAuth response
-    name: str | None = None
-    sub: str | None = None
+    credential: str | None = Field(default=None, max_length=8192)  # Google ID token
 
 
 class UserProfile(Contract):
@@ -60,35 +56,51 @@ def normalize_email(email: str) -> str:
     return email.strip().lower()
 
 
-def parse_google_credential(body: GoogleAuthRequest) -> dict[str, str]:
-    """Parse Google ID token or direct OAuth response payload."""
-    if body.credential:
-        try:
-            # Decode Google JWT payload claims
-            claims = jwt.decode(body.credential, options={"verify_signature": False})
-            email = claims.get("email")
-            if not email:
-                raise ValueError("Google credential does not contain an email address")
-            name = claims.get("name") or claims.get("given_name") or email.split("@")[0]
-            sub = claims.get("sub") or f"google_{claims.get('email')}"
-            return {"email": normalize_email(email), "name": name, "sub": f"google:{sub}"}
-        except Exception as err:
-            raise HTTPException(401, f"Failed to parse Google ID token: {err}") from err
+def demo_enabled(request: Request) -> bool:
+    return request.app.state.settings.app_mode in {"demo", "test"}
 
-    if body.email:
-        email = normalize_email(body.email)
-        name = body.name or email.split("@")[0]
-        sub = body.sub or f"google:{email}"
-        return {"email": email, "name": name, "sub": sub}
 
-    raise HTTPException(400, "Google credential or email is required")
+def verify_google_credential(credential: str, audience: str) -> dict[str, str]:
+    """Verify signature, audience, issuer and expiry of a Google ID token."""
+    try:
+        from google.auth.transport import requests as google_requests
+        from google.oauth2 import id_token
+    except ImportError as err:
+        raise HTTPException(503, "Install google-auth to enable Google sign-in") from err
+    try:
+        claims = id_token.verify_oauth2_token(credential, google_requests.Request(), audience)
+    except ValueError as err:
+        raise HTTPException(401, "Google sign-in could not be verified") from err
+    except Exception as err:
+        raise HTTPException(503, "Google sign-in is temporarily unavailable") from err
+    if claims.get("iss") not in {"accounts.google.com", "https://accounts.google.com"}:
+        raise HTTPException(401, "Google token issuer is not trusted")
+    if claims.get("email_verified") is not True or not isinstance(claims.get("email"), str):
+        raise HTTPException(401, "A verified Google email address is required")
+    email = normalize_email(claims["email"])
+    name = str(claims.get("name") or email.split("@")[0]).strip()[:100] or "Citizen"
+    return {"email": email, "name": name, "sub": f"google:{claims['sub']}"}
+
+
+@router.get("/auth/options")
+@compat_router.get("/auth/options")
+def auth_options(request: Request) -> dict[str, Any]:
+    return {
+        "google_client_id": request.app.state.settings.google_client_id or None,
+        "demo_enabled": demo_enabled(request),
+    }
 
 
 @router.post("/auth/google", response_model=AuthResponse)
 @compat_router.post("/auth/google", response_model=AuthResponse)
 def google_sign_in(body: GoogleAuthRequest, request: Request) -> AuthResponse:
-    """Sole citizen authentication endpoint: verifies Google identity and auto-provisions citizen account."""
-    google_data = parse_google_credential(body)
+    """Citizen sign-in. Only a Google-signed ID token is accepted; never a bare email."""
+    audience = request.app.state.settings.google_client_id
+    if not audience:
+        raise HTTPException(503, "Google sign-in is not configured (set GOOGLE_CLIENT_ID)")
+    if not body.credential:
+        raise HTTPException(400, "A Google credential is required")
+    google_data = verify_google_credential(body.credential, audience)
     email = google_data["email"]
     name = google_data["name"]
     auth_sub = google_data["sub"]
@@ -100,21 +112,22 @@ def google_sign_in(body: GoogleAuthRequest, request: Request) -> AuthResponse:
                 FROM users WHERE auth_subject=:sub OR email=:email
             """),
             {"sub": auth_sub, "email": email},
-        ).mappings().one_or_none()
+        ).mappings().first()
 
         if user:
             if not user["active"]:
                 raise HTTPException(403, "Account has been deactivated. Contact administration.")
+            if user["user_role"] != "citizen":
+                raise HTTPException(403, "Staff accounts cannot sign in with Google")
             user_id = user["id"]
             user_role = user["user_role"]
             created_at = user["created_at"]
-            # Ensure auth_subject is updated to Google subject
+            name = user["display_name"]
             connection.execute(
                 text("UPDATE users SET auth_subject=:sub, email_verified=true WHERE id=:id"),
                 {"sub": auth_sub, "id": user_id},
             )
         else:
-            # Auto-provision new citizen account from verified Google identity
             user_id = uuid4()
             user_role = "citizen"
             created_at = datetime.now(UTC)
@@ -132,16 +145,13 @@ def google_sign_in(body: GoogleAuthRequest, request: Request) -> AuthResponse:
 
     token = create_access_token(
         subject=auth_sub,
-        secret=getattr(request.app.state.tokens, "jwt_secret", "local_dev_jwt_secret_must_change_in_prod_32chars"),
+        secret=request.app.state.settings.jwt_secret,
         email=email,
         role=user_role,
+        expires_delta=timedelta(hours=request.app.state.settings.session_expire_hours),
     )
     user_profile = UserProfile(
-        id=user_id,
-        name=name,
-        email=email,
-        role=user_role,
-        created_at=created_at,
+        id=user_id, name=name, email=email, role=user_role, created_at=created_at
     )
     return AuthResponse(access_token=token, user=user_profile)
 
@@ -158,7 +168,9 @@ class StandardLoginRequest(BaseModel):
 @router.post("/auth/demo-login", response_model=AuthResponse)
 @compat_router.post("/auth/demo-login", response_model=AuthResponse)
 def demo_login(body: DemoLoginRequest, request: Request) -> AuthResponse:
-    """One-click demo authentication for demo admin or demo citizen."""
+    """One-click demo authentication; exists only when APP_MODE is demo/test."""
+    if not demo_enabled(request):
+        raise HTTPException(404, "Not found")
     is_admin = body.account_type.lower() in {"admin", "nigam", "reviewer"}
     email = "admin@nagarsaathi.gov.in" if is_admin else "citizen@gmail.com"
     name = "Nagar Saathi Administrator" if is_admin else "Citizen Saathi"
@@ -188,11 +200,6 @@ def demo_login(body: DemoLoginRequest, request: Request) -> AuthResponse:
                 text("INSERT INTO user_roles (user_id, role) VALUES (:id, :role)"),
                 {"id": user_id, "role": role},
             )
-            if is_admin:
-                connection.execute(
-                    text("INSERT INTO user_roles (user_id, role) VALUES (:id, 'nigam') ON CONFLICT DO NOTHING"),
-                    {"id": user_id},
-                )
         else:
             user_id = uuid4()
             user_role = role
@@ -208,15 +215,10 @@ def demo_login(body: DemoLoginRequest, request: Request) -> AuthResponse:
                 text("INSERT INTO user_roles (user_id, role) VALUES (:id, :role)"),
                 {"id": user_id, "role": role},
             )
-            if is_admin:
-                connection.execute(
-                    text("INSERT INTO user_roles (user_id, role) VALUES (:id, 'nigam') ON CONFLICT DO NOTHING"),
-                    {"id": user_id},
-                )
 
     token = create_access_token(
         subject=auth_sub,
-        secret=getattr(request.app.state.tokens, "jwt_secret", "local_dev_jwt_secret_must_change_in_prod_32chars"),
+        secret=request.app.state.settings.jwt_secret,
         email=email,
         role=user_role,
     )
@@ -233,11 +235,15 @@ def demo_login(body: DemoLoginRequest, request: Request) -> AuthResponse:
 @router.post("/auth/login", response_model=AuthResponse)
 @compat_router.post("/auth/login", response_model=AuthResponse)
 def standard_login(body: StandardLoginRequest, request: Request) -> AuthResponse:
-    """Compatibility login route supporting demo accounts and credentials."""
+    """Password sign-in is not implemented; only the two fixed demo accounts, demo mode only."""
+    if not demo_enabled(request):
+        raise HTTPException(401, "Password sign-in is not enabled. Use Google sign-in.")
     email = normalize_email(body.email)
-    is_admin = "admin" in email
-    account_type = "admin" if is_admin else "citizen"
-    return demo_login(DemoLoginRequest(account_type=account_type), request)
+    if email == "admin@nagarsaathi.gov.in":
+        return demo_login(DemoLoginRequest(account_type="admin"), request)
+    if email == "citizen@gmail.com":
+        return demo_login(DemoLoginRequest(account_type="citizen"), request)
+    raise HTTPException(401, "Unknown demo account")
 
 
 @router.get("/auth/me", response_model=UserProfile)

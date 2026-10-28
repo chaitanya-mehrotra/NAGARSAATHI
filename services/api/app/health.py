@@ -8,7 +8,9 @@ from app.settings import Settings
 
 def check_database(settings: Settings) -> bool:
     try:
-        with psycopg.connect(settings.database_url, connect_timeout=2) as connection:
+        # libpq URLs have no SQLAlchemy "+driver" suffix
+        url = settings.database_url.replace("postgresql+psycopg://", "postgresql://", 1)
+        with psycopg.connect(url, connect_timeout=2) as connection:
             with connection.cursor() as cursor:
                 cursor.execute("SELECT PostGIS_Version()")
                 return cursor.fetchone() is not None

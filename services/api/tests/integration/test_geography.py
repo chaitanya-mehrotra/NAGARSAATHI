@@ -173,5 +173,5 @@ def test_repeated_seed_is_idempotent(
     first = seed_foundation(db, spatial_database[1])
     assert seed_foundation(db, spatial_database[1]) == first
     assert db.exec_driver_sql("SELECT count(*) FROM areas").scalar_one() == 6
-    assert db.exec_driver_sql("SELECT count(*) FROM categories").scalar_one() == 5
+    assert db.exec_driver_sql("SELECT count(*) FROM categories").scalar_one() == 8
     assert db.exec_driver_sql("SELECT count(*) FROM pois").scalar_one() == 3

@@ -1,10 +1,11 @@
 from pathlib import Path
-from typing import Literal, Self
+from typing import Annotated, Literal, Self
 
-from pydantic import Field, model_validator
-from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import Field, field_validator, model_validator
+from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_JWT_SECRET = "local_dev_jwt_secret_must_change_in_prod_32chars"
 
 
 class Settings(BaseSettings):
@@ -12,23 +13,40 @@ class Settings(BaseSettings):
 
     app_mode: Literal["demo", "test", "production"] = "demo"
     auth_provider: Literal["demo", "oidc"] = "demo"
-    validation_provider: Literal["fixture", "human_review"] = "fixture"
+    validation_provider: Literal["fixture", "human_review", "yolo"] = "fixture"
     database_url: str = (
         "postgresql://nagarsaathi_demo:local_demo_only@127.0.0.1:55432/nagarsaathi_demo"
     )
     storage_root: Path = Path(".local/media")
     config_file: Path = PROJECT_ROOT / "config/demo.yaml"
-    cors_origins: list[str] = ["http://localhost:5173", "http://127.0.0.1:5173"]
+    cors_origins: Annotated[list[str], NoDecode] = [
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ]
+    jwt_secret: str = DEFAULT_JWT_SECRET
+    google_client_id: str = ""
+    session_expire_hours: int = Field(default=72, ge=1, le=720)
     oidc_issuer: str = ""
     oidc_audience: str = ""
     oidc_jwks_url: str = ""
     boundaries_reviewed: bool = False
     category_rules_reviewed: bool = False
+    yolo_model_path: Path = Path("models/nagarsaathi-combined-v3.pt")
+    yolo_metadata_path: Path = Path("models/nagarsaathi-combined-v3.metadata.json")
+    yolo_device: str = "cpu"
     upload_max_bytes: int = Field(default=10 * 1024 * 1024, ge=1, le=10 * 1024 * 1024)
     report_max_bytes: int = Field(default=25 * 1024 * 1024, ge=1, le=25 * 1024 * 1024)
     image_max_pixels: int = Field(default=25_000_000, ge=1, le=25_000_000)
     upload_ttl_seconds: int = Field(default=3600, ge=60, le=86400)
     pilot_code: str = "bengaluru_southeast_v1"
+
+    @field_validator("cors_origins", mode="before")
+    @classmethod
+    def split_origins(cls, value: object) -> object:
+        # Accept "a,b" from .env / compose as well as a JSON list.
+        if isinstance(value, str) and not value.lstrip().startswith("["):
+            return [item.strip() for item in value.split(",") if item.strip()]
+        return value
 
     @model_validator(mode="after")
     def reject_unsafe_production(self) -> Self:
@@ -44,6 +62,8 @@ class Settings(BaseSettings):
                 and self.oidc_jwks_url.startswith("https://")
             ):
                 raise ValueError("OIDC issuer and JWKS URL must use HTTPS")
+        if self.app_mode == "production" and self.jwt_secret == DEFAULT_JWT_SECRET:
+            raise ValueError("Production requires a non-default JWT_SECRET")
         if self.app_mode == "production":
             if not (self.oidc_issuer and self.oidc_audience and self.oidc_jwks_url):
                 raise ValueError("Production requires OIDC issuer, audience and JWKS URL")

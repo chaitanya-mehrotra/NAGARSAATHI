@@ -33,6 +33,30 @@ categories:
     duplicate_radius_m: 15
     requires_manual_categorisation: false
     auto_merge_allowed: false
+  - code: waterlogging
+    label: Waterlogging
+    department_tag: demo_drainage
+    default_severity: 0.70
+    target_resolution_hours: 24
+    duplicate_radius_m: 40
+    requires_manual_categorisation: false
+    auto_merge_allowed: false
+  - code: both
+    label: Pothole and waterlogging
+    department_tag: demo_roads
+    default_severity: 0.75
+    target_resolution_hours: 48
+    duplicate_radius_m: 30
+    requires_manual_categorisation: false
+    auto_merge_allowed: false
+  - code: electric_pole_fallen
+    label: Fallen electric pole / live wires
+    department_tag: demo_lighting
+    default_severity: 0.95
+    target_resolution_hours: 4
+    duplicate_radius_m: 20
+    requires_manual_categorisation: true
+    auto_merge_allowed: false
   - code: other_civic_issue
     label: Other civic issue
     department_tag: demo_manual_review

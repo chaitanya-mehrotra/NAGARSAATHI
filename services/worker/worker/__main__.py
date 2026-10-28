@@ -1,3 +1,4 @@
+from app.adapters.interfaces import PhotoValidator
 from app.adapters.validation import FixtureValidator, HumanReviewValidator
 from app.database import create_database_engine
 from app.domain.priority import schedule_age_refresh
@@ -25,11 +26,16 @@ def main() -> None:
         print("Worker dependency check passed.")
         return
     engine = create_database_engine(settings)
-    validator = (
-        FixtureValidator(settings)
-        if settings.validation_provider == "fixture"
-        else HumanReviewValidator()
-    )
+    if settings.validation_provider == "fixture":
+        validator: PhotoValidator = FixtureValidator(settings)
+    elif settings.validation_provider == "yolo":
+        from app.adapters.yolo import YoloValidator
+
+        validator = YoloValidator(settings, engine)
+        validator.load()  # fail fast on a missing or mismatched checkpoint
+        print(f"YOLO validator ready: {validator.metadata['model_version']}", flush=True)
+    else:
+        validator = HumanReviewValidator()
     try:
         if args.once:
             print("Processed one job." if process_once(engine, validator) else "No ready jobs.")

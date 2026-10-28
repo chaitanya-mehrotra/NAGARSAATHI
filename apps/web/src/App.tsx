@@ -34,13 +34,13 @@ import {
   request,
   loginWithGoogle,
   loginWithDemo,
-  login,
+  getAuthOptions,
   logout,
   getStoredUser,
+  getStoredToken,
   StoredUser,
   reportPhotoUrl,
   deduplicateKeepOne,
-  analyzePhotoWithYolo,
   YoloAnalysisResult,
   calculatePriorityScore,
 } from "./services";
@@ -87,6 +87,53 @@ const fresh = () => ({
   forceMismatch: false,
 });
 
+/** Photos need the bearer token, which a plain <img src> cannot send: fetch and show a blob. */
+function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const [url, setUrl] = useState("");
+  const [failed, setFailed] = useState(false);
+  useEffect(() => {
+    let objectUrl = "";
+    let active = true;
+    setUrl("");
+    setFailed(false);
+    fetch(src, { headers: { Authorization: `Bearer ${getStoredToken()}` } })
+      .then((response) => {
+        if (!response.ok) throw new Error(String(response.status));
+        return response.blob();
+      })
+      .then((blob) => {
+        if (!active) return;
+        objectUrl = URL.createObjectURL(blob);
+        setUrl(objectUrl);
+      })
+      .catch(() => active && setFailed(true));
+    return () => {
+      active = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [src]);
+  if (failed) return <p className="location-line">Photo could not be loaded.</p>;
+  return url ? <img className={className} src={url} alt={alt} /> : null;
+}
+
+/** The API returns nested counts; the dashboard tiles read flat keys. */
+function flattenMetrics(m: any): Record<string, number> {
+  if (!m?.reports) return m;
+  const reports = m.reports;
+  const issues = m.issues ?? {};
+  const categories = m.categories ?? {};
+  return {
+    total: reports.total ?? 0,
+    pothole: categories.pothole ?? 0,
+    waterlogging: categories.waterlogging ?? 0,
+    resolved: issues.resolved ?? 0,
+    open: (reports.admitted ?? 0) + (reports.pending ?? 0),
+    in_progress: issues.active ?? 0,
+    rejected: reports.rejected ?? 0,
+    suspicious: reports.suspicious ?? 0,
+  };
+}
+
 export function App() {
   const [page, setPage] = useState<string>("Overview");
   const [mobile, setMobile] = useState<boolean>(false);
@@ -114,8 +161,14 @@ export function App() {
   const isAdmin = user?.role === "admin";
   const isNigam = user?.role === "nigam" || isAdmin;
   const [authModal, setAuthModal] = useState<boolean>(false);
-  const [authTab, setAuthTab] = useState<"login" | "demo">("demo");
-  const [googleEmail, setGoogleEmail] = useState<string>("");
+  const [authTab, setAuthTab] = useState<"login" | "demo">("login");
+  const [authOptions, setAuthOptions] = useState<{ google_client_id: string | null; demo_enabled: boolean }>({
+    google_client_id: null,
+    demo_enabled: false,
+  });
+  useEffect(() => {
+    getAuthOptions().then(setAuthOptions);
+  }, []);
   const [authError, setAuthError] = useState<string>("");
   const [authLoading, setAuthLoading] = useState<boolean>(false);
 
@@ -204,7 +257,7 @@ export function App() {
           if (active) {
             setRows(data.items || []);
             setTotal(data.total ?? 0);
-            if (m) setMetrics(m);
+            if (m) setMetrics(flattenMetrics(m));
             setError("");
           }
         })
@@ -255,40 +308,15 @@ export function App() {
     }
   }
 
-  // Google Sign-In Handler
-  async function handleGoogleSignIn() {
-    setAuthError("");
-    setAuthLoading(true);
-    try {
-      const email = googleEmail.trim() || "citizen.user@gmail.com";
-      const name = email.split("@")[0].replace(".", " ");
-      const res = await loginWithGoogle({
-        email,
-        name,
-        sub: `google_${email.replace(/[^a-zA-Z0-9]/g, "_")}`,
-      });
-      setUser(res.user);
-      setAuthModal(false);
-      notify(`Signed in with Google as ${res.user.name}`);
-      reload();
-    } catch (err: any) {
-      setAuthError(err.message || "Google Sign-In failed");
-    } finally {
-      setAuthLoading(false);
-    }
-  }
-
   // Google Identity Services (GSI) API integration
   useEffect(() => {
-    if (authModal && authTab === "login") {
+    if (authModal && authTab === "login" && authOptions.google_client_id) {
       const initGsi = () => {
         const gsi = (window as any).google?.accounts?.id;
         if (gsi) {
           try {
             gsi.initialize({
-              client_id:
-                (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID ||
-                "102874625291-demo.apps.googleusercontent.com",
+              client_id: authOptions.google_client_id,
               callback: handleGoogleCredentialResponse,
             });
             const slot = document.getElementById("gsi-button-slot");
@@ -311,7 +339,7 @@ export function App() {
       const t = setTimeout(initGsi, 120);
       return () => clearTimeout(t);
     }
-  }, [authModal, authTab]);
+  }, [authModal, authTab, authOptions.google_client_id]);
 
   async function handleGoogleCredentialResponse(response: any) {
     if (!response?.credential) return;
@@ -368,8 +396,8 @@ export function App() {
       return;
     }
     setFormError("");
-    const analysis = analyzePhotoWithYolo(form.issue_type, file.name, form.forceMismatch);
-    setForm((f) => ({ ...f, file, analysis }));
+    // Photo verification runs on the server after submission; the browser never fakes a verdict.
+    setForm((f) => ({ ...f, file, analysis: null }));
   }
 
   // Wizard step navigation
@@ -412,6 +440,8 @@ export function App() {
         headers: { "Content-Type": form.file!.type },
         body: form.file,
       });
+      // The server must verify and mark the upload ready before a report can use it.
+      await request(`/api/v1/uploads/${uploadRes.id}/complete`, { method: "POST" });
 
       // 2. Submit report
       const idempotencyKey = crypto.randomUUID();
@@ -424,9 +454,6 @@ export function App() {
         body: JSON.stringify({
           description: form.description,
           claimed_category: form.issue_type,
-          seriousness: form.seriousness,
-          is_suspicious: Boolean(form.analysis?.is_suspicious),
-          suspicious_reason: form.analysis?.suspicious_reason || "",
           media_ids: [uploadRes.id],
           location: {
             longitude: form.longitude,
@@ -832,9 +859,7 @@ export function App() {
                                   key === "electric_pole_fallen"
                                     ? "critical_hazard"
                                     : form.seriousness;
-                                const newAnalysis = form.file
-                                  ? analyzePhotoWithYolo(key, form.file.name, form.forceMismatch)
-                                  : null;
+                                const newAnalysis = null;
                                 setForm({
                                   ...form,
                                   issue_type: key,
@@ -1025,140 +1050,15 @@ export function App() {
                           </button>
                         )}
 
-                        {/* YOLO FINE-TUNED MODEL VALIDATION CARD */}
                         {form.file && (
-                          <div
-                            style={{
-                              marginTop: "16px",
-                              padding: "14px",
-                              borderRadius: "8px",
-                              border: form.analysis?.is_suspicious
-                                ? "1px solid #f59e0b"
-                                : "1px solid #10b981",
-                              background: form.analysis?.is_suspicious
-                                ? "#fffbeb"
-                                : "#f0fdf4",
-                            }}
-                          >
-                            <div
-                              style={{
-                                display: "flex",
-                                justifyContent: "space-between",
-                                alignItems: "center",
-                                marginBottom: "8px",
-                                flexWrap: "wrap",
-                                gap: "6px",
-                              }}
-                            >
-                              <div
-                                style={{
-                                  display: "flex",
-                                  alignItems: "center",
-                                  gap: "8px",
-                                  fontWeight: 700,
-                                  fontSize: "13px",
-                                  color: form.analysis?.is_suspicious
-                                    ? "#b45309"
-                                    : "#047857",
-                                }}
-                              >
-                                {form.analysis?.is_suspicious ? (
-                                  <AlertTriangle size={18} />
-                                ) : (
-                                  <Check size={18} />
-                                )}
-                                <span>
-                                  YOLO FINE-TUNED MODEL (
-                                  {form.analysis?.model_version ||
-                                    "nagarsaathi-yolo11n-v3"}
-                                  )
-                                </span>
-                              </div>
-                              <button
-                                type="button"
-                                className="text-button"
-                                style={{
-                                  fontSize: "11px",
-                                  textDecoration: "underline",
-                                  color: "#64748b",
-                                }}
-                                onClick={() => {
-                                  const toggled = !form.forceMismatch;
-                                  const newAnalysis = analyzePhotoWithYolo(
-                                    form.issue_type,
-                                    form.file?.name || "",
-                                    toggled
-                                  );
-                                  setForm((f) => ({
-                                    ...f,
-                                    forceMismatch: toggled,
-                                    analysis: newAnalysis,
-                                  }));
-                                }}
-                              >
-                                {form.forceMismatch
-                                  ? "Reset to Verified Match"
-                                  : "⚡ Simulate YOLO Mismatch (Test Suspicious Flag)"}
-                              </button>
-                            </div>
-
-                            {form.analysis?.is_suspicious ? (
-                              <div>
-                                <strong
-                                  style={{
-                                    color: "#b45309",
-                                    display: "block",
-                                    marginBottom: "4px",
-                                  }}
-                                >
-                                  ⚠️ Detection Mismatch Flagged (Review Hold & Penalty)
-                                </strong>
-                                <p
-                                  style={{
-                                    margin: 0,
-                                    fontSize: "12px",
-                                    color: "#92400e",
-                                  }}
-                                >
-                                  {form.analysis?.suspicious_reason}
-                                </p>
-                                <small
-                                  style={{
-                                    display: "block",
-                                    marginTop: "6px",
-                                    color: "#b45309",
-                                    fontWeight: 600,
-                                  }}
-                                >
-                                  Prioritisation penalty applied: -35 pts deduction. Priority will be lower until inspected by an admin.
-                                </small>
-                              </div>
-                            ) : (
-                              <div>
-                                <strong
-                                  style={{
-                                    color: "#047857",
-                                    display: "block",
-                                    marginBottom: "4px",
-                                  }}
-                                >
-                                  ✅ Model Detection Matches Claimed Issue
-                                </strong>
-                                <p
-                                  style={{
-                                    margin: 0,
-                                    fontSize: "12px",
-                                    color: "#065f46",
-                                  }}
-                                >
-                                  {form.issue_type === "electric_pole_fallen"
-                                    ? "Critical hazard verified for immediate municipal response."
-                                    : `Ultralytics YOLO fine-tuned detector verified ${form.analysis?.detections?.[0]?.class_name || form.issue_type} with ${((form.analysis?.detections?.[0]?.confidence || 0.89) * 100).toFixed(1)}% confidence.`}
-                                </p>
-                              </div>
-                            )}
-                          </div>
+                          <p style={{ marginTop: "12px", fontSize: "12px", color: "var(--muted)" }}>
+                            Your photo is checked automatically after you submit. If it does not
+                            appear to match the issue you selected, the report is kept and flagged
+                            for human review.
+                          </p>
                         )}
+
+
 
                         <div className="location-heading">
                           <label className="field-label">Issue location *</label>
@@ -1337,7 +1237,6 @@ export function App() {
                             longitude: form.longitude,
                             duplicate_count: 0,
                             priority: form.issue_type === "electric_pole_fallen" ? "urgent" : "normal",
-                            is_suspicious: Boolean(form.analysis?.is_suspicious),
                           });
 
                           return (
@@ -1359,7 +1258,7 @@ export function App() {
                                 }}
                               >
                                 <strong style={{ fontSize: "13px", color: "#334155" }}>
-                                  ⚡ Prioritisation Engine Assessment
+                                  ⚡ Estimated priority (before photo check)
                                 </strong>
                                 <span
                                   className={"priority-pill " + live.band}
@@ -1413,8 +1312,10 @@ export function App() {
                         <div className="privacy-note">
                           <Info size={18} />
                           <span>
-                            Validated with YOLO11n fine-tuned road defect model. Prioritised
-                            based on issue seriousness, citizen complaint count, and corridor density.
+                            This is an estimate based on the category you selected. After you submit,
+                            the photo is checked automatically by a road-defect model. If it does not
+                            match the selected issue, the report is flagged for human review and its
+                            priority is held until it is checked.
                           </span>
                         </div>
                       </>
@@ -1994,7 +1895,7 @@ export function App() {
             <p className="review-description">{detail.description}</p>
 
             {detail.photo_url && (
-              <img
+              <AuthImage
                 className="detail-photo"
                 src={reportPhotoUrl(detail.photo_url)}
                 alt="Complaint evidence"
@@ -2375,11 +2276,11 @@ export function App() {
             <div className="eyebrow">CITIZEN & ADMIN ACCESS</div>
             <h2 id="auth-title">Sign In to NAGARSAATHI</h2>
             <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "16px" }}>
-              Choose a demo account or sign in with your Google account.
+              Sign in with your Google account.{authOptions.demo_enabled ? " Demo accounts are available in this environment." : ""}
             </p>
 
             <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", marginBottom: "20px" }}>
-              <button
+              {authOptions.demo_enabled && <button
                 type="button"
                 className="text-button"
                 style={{
@@ -2392,7 +2293,7 @@ export function App() {
                 onClick={() => setAuthTab("demo")}
               >
                 Demo Accounts
-              </button>
+              </button>}
               <button
                 type="button"
                 className="text-button"
@@ -2415,7 +2316,7 @@ export function App() {
               </div>
             )}
 
-            {authTab === "demo" ? (
+            {authTab === "demo" && authOptions.demo_enabled ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <p style={{ fontSize: "12px", color: "var(--muted)", margin: 0 }}>
                   Instant one-click access with pre-configured demo permissions:
@@ -2468,41 +2369,11 @@ export function App() {
                   }}
                 />
 
-                <div
-                  style={{
-                    display: "flex",
-                    alignItems: "center",
-                    gap: "10px",
-                    margin: "14px 0",
-                    color: "#94a3b8",
-                    fontSize: "12px",
-                  }}
-                >
-                  <hr style={{ flex: 1, border: "none", borderTop: "1px solid #e2e8f0" }} />
-                  <span>OR WITH GOOGLE EMAIL</span>
-                  <hr style={{ flex: 1, border: "none", borderTop: "1px solid #e2e8f0" }} />
-                </div>
-
-                <div style={{ marginBottom: "14px" }}>
-                  <label className="field-label">Google Account Email</label>
-                  <input
-                    type="email"
-                    placeholder="user@gmail.com"
-                    value={googleEmail}
-                    onChange={(e) => setGoogleEmail(e.target.value)}
-                    style={{ width: "100%", padding: "10px", borderRadius: "6px", border: "1px solid #cbd5e1" }}
-                  />
-                </div>
-
-                <button
-                  type="button"
-                  className="primary"
-                  style={{ width: "100%", padding: "12px", justifyContent: "center" }}
-                  disabled={authLoading}
-                  onClick={handleGoogleSignIn}
-                >
-                  {authLoading ? "Signing in..." : "Continue with Google Account"}
-                </button>
+                {!authOptions.google_client_id && (
+                  <div className="error-box" style={{ margin: 0 }}>
+                    Google sign-in is not configured on the server. Set GOOGLE_CLIENT_ID and restart the API.
+                  </div>
+                )}
               </div>
             )}
           </section>

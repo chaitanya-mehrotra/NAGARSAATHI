@@ -56,6 +56,7 @@ def test_production_cannot_start_before_adapters_are_implemented(tmp_path: Path)
         oidc_jwks_url="https://identity.example.invalid/jwks",
         boundaries_reviewed=True,
         category_rules_reviewed=True,
+        jwt_secret="x" * 48,
         storage_root=tmp_path,
     )
     with pytest.raises(RuntimeError, match="not implemented"):

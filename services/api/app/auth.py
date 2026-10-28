@@ -1,7 +1,6 @@
 from datetime import UTC, datetime, timedelta
 import hashlib
 import hmac
-import os
 import secrets
 from typing import Any, Protocol
 
@@ -62,7 +61,7 @@ class MultiTokenVerifier:
 
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
-        self.jwt_secret = os.getenv("JWT_SECRET", "local_dev_jwt_secret_must_change_in_prod_32chars")
+        self.jwt_secret = settings.jwt_secret
         self.demo_subjects: set[str] = set()
 
         if settings.app_mode in {"demo", "test"}:

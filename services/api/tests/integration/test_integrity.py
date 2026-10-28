@@ -21,7 +21,7 @@ def test_fresh_migration_and_upgrade_preserve_data() -> None:
         with engine.connect() as connection:
             assert (
                 connection.exec_driver_sql("SELECT version_num FROM alembic_version").scalar_one()
-                == "0009"
+                == "0011"
             )
             assert connection.exec_driver_sql("SELECT id FROM users").scalar_one() == user
         migrate(engine, "0000", "downgrade")

@@ -150,6 +150,12 @@ def process_once(
                 if reason == "claimed_category_conflict_or_manual_category" or (category is None and reason not in {"human_review_required", "photo_needs_review"}):
                     is_suspicious = True
                     suspicious_reason = f"Model detection mismatch: claimed '{current['claimed_category']}' but detector predicted '{', '.join(detected_labels)}'"
+            elif any(r.provider == "model" and r.decision == "needs_review" for r in results):
+                is_suspicious = True
+                suspicious_reason = (
+                    f"Photo does not appear to show the claimed '{current['claimed_category']}': "
+                    "the detector found no pothole or waterlogging. Human review required."
+                )
             if validator is None:
                 reason = "human_review_required"
             point = IssuePoint.model_validate(current["location_evidence"].get("point", {}))
