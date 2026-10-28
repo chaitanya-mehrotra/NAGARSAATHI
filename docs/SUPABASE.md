@@ -44,6 +44,16 @@ Supabase database is always named `postgres`, so `ALLOW_HOSTED_DEMO_SEED=true` i
 opt-in. It still only works when `APP_MODE` is `demo` or `test`. Remove it for a real production
 database and seed real boundaries and categories instead.
 
+## Common mistakes
+
+- **Square brackets around the password.** Supabase's example shows `[YOUR-PASSWORD]`; the brackets
+  are a placeholder, not part of the password. Leaving them in makes the login fail.
+- **Special characters in the password** (`/`, `+`, `@`, `#`, `?`, `%`) break the URL unless they are
+  percent-encoded. Use letters and digits only.
+- **Transaction pooler (port 6543) or direct connection.** Use the session pooler on 5432.
+- **Pasting the password or secret key into chat, tickets or a commit.** If it happens, reset the
+  database password (Database settings) or the key (Project Settings → API Keys).
+
 ## Security notes
 
 - Migration `0013` enables row-level security on every table and revokes the `anon` and
@@ -62,6 +72,13 @@ database and seed real boundaries and categories instead.
 - Projects idle for about a week are paused and must be restarted from the dashboard.
 - Limited connections: the pool is small by default (`DB_POOL_SIZE=5`, `DB_MAX_OVERFLOW=5`).
   The API plus the worker together use up to about 20.
+
+## Verified
+
+Migrated to revision 0013 on a free-plan Supabase project (Postgres 17, PostGIS 3.3): 28 tables, all
+with RLS, no grants to `anon`/`authenticated`. Six demo complaints went through the API and worker
+with the YOLO check; the six photos live in the private bucket and are served back to admins through
+the API.
 
 ## Known gap
 
