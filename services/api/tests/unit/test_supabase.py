@@ -122,6 +122,27 @@ def test_hosted_databases_require_tls_but_local_ones_do_not():
     engine.dispose()
 
 
+def test_hosted_connections_use_keepalives_and_local_ones_do_not():
+    from sqlalchemy import event
+
+    captured = {}
+
+    def grab(engine):
+        event.listen(
+            engine, "do_connect", lambda dialect, rec, args, kwargs: captured.update(kwargs=kwargs)
+        )
+
+    for url, expect in ((HOSTED, True), ("postgresql://u:p@127.0.0.1:1/x_demo", False)):
+        engine = create_database_engine(settings(database_url=url))
+        grab(engine)
+        try:
+            engine.connect().close()
+        except Exception:
+            pass  # nothing listens; only the connection arguments matter here
+        engine.dispose()
+        assert ("keepalives" in captured["kwargs"]) is expect
+
+
 def test_hosted_demo_seed_needs_an_explicit_opt_in():
     with pytest.raises(ValueError, match="Demo"):
         require_local_demo(settings(database_url=HOSTED))

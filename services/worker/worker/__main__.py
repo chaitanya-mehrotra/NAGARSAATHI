@@ -5,11 +5,44 @@ from app.domain.priority import schedule_age_refresh
 from app.health import check_database
 from app.jobs import process_once
 from app.settings import Settings
+from sqlalchemy.exc import InterfaceError, OperationalError
+from sqlalchemy.exc import TimeoutError as PoolTimeoutError
+
+
+TRANSIENT_DATABASE_ERRORS = (OperationalError, InterfaceError, PoolTimeoutError)
+
+
+def run_loop(engine, validator, *, sleep=None, max_backoff=30.0, should_stop=lambda: False):
+    """Process jobs until stopped. A dropped or unreachable database is retried with backoff.
+
+    Hosted databases drop connections now and then (idle timeouts, pooler restarts, network
+    changes). The worker must survive that: an interrupted job's lease expires and is reclaimed.
+    Only connection-level errors are retried; anything else still stops the worker loudly.
+    """
+    import time
+
+    sleep = sleep or time.sleep
+    delay = 1.0
+    while not should_stop():
+        try:
+            schedule_age_refresh(engine)
+            busy = process_once(engine, validator)
+        except TRANSIENT_DATABASE_ERRORS as error:
+            print(
+                f"Database unavailable ({error.__class__.__name__}); retrying in {delay:.0f}s",
+                flush=True,
+            )
+            engine.dispose()  # drop connections the server has already closed
+            sleep(delay)
+            delay = min(delay * 2, max_backoff)
+            continue
+        delay = 1.0
+        if not busy:
+            sleep(1)
 
 
 def main() -> None:
     import argparse
-    import time
 
     parser = argparse.ArgumentParser(
         description="Revision-aware validation, admission and priority refresh worker"
@@ -41,10 +74,7 @@ def main() -> None:
             print("Processed one job." if process_once(engine, validator) else "No ready jobs.")
         else:
             print("Validation, admission and priority worker running; Ctrl+C stops it.", flush=True)
-            while True:
-                schedule_age_refresh(engine)
-                if not process_once(engine, validator):
-                    time.sleep(1)
+            run_loop(engine, validator)
     finally:
         engine.dispose()
 

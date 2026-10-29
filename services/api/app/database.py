@@ -29,5 +29,16 @@ def create_database_engine(settings: Settings) -> Engine:
         pool_size=settings.db_pool_size,
         max_overflow=settings.db_max_overflow,
         pool_recycle=1800 if hosted else -1,
-        connect_args={"connect_timeout": 10 if hosted else 3},
+        connect_args=(
+            # TCP keepalives keep idle pooled connections from being silently dropped.
+            {
+                "connect_timeout": 10,
+                "keepalives": 1,
+                "keepalives_idle": 30,
+                "keepalives_interval": 10,
+                "keepalives_count": 5,
+            }
+            if hosted
+            else {"connect_timeout": 3}
+        ),
     )
