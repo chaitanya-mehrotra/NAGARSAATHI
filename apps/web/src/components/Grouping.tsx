@@ -190,7 +190,7 @@ export function GroupingControls({
               }
             }}
           >
-            🗑️ Delete All Duplicates (Keep Only This Report)
+            Delete all duplicates (keep this report)
           </button>
         </div>
       </div>

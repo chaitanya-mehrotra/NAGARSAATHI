@@ -14,6 +14,7 @@ from sqlalchemy import text
 
 from app.auth import create_access_token, load_actor
 from app.domain.enums import Role
+from app.domain.report_status import DISPLAY_STATUS_SQL, DISPLAY_STATUSES, REPORT_WITH_ISSUE_SQL
 from app.intake_schemas import Actor
 from app.schemas import Contract
 
@@ -341,6 +342,15 @@ def get_metrics(request: Request) -> dict[str, Any]:
             GROUP BY claimed_category
         """)).mappings().all()
 
+        # Same status rule as the complaints list, so a counter and its filter agree.
+        stage_rows = connection.execute(text(f"""
+            SELECT {DISPLAY_STATUS_SQL} AS stage, COUNT(*) AS count
+            FROM {REPORT_WITH_ISSUE_SQL}
+            WHERE r.deleted_at IS NULL
+            GROUP BY 1
+        """)).mappings().all()
+        stages = dict.fromkeys(DISPLAY_STATUSES, 0) | {row["stage"]: row["count"] for row in stage_rows}
+
     return {
         "reports": {
             "total": counts["total_reports"],
@@ -355,4 +365,5 @@ def get_metrics(request: Request) -> dict[str, Any]:
             "active": issue_counts["active_issues"],
         },
         "categories": {row["claimed_category"]: row["count"] for row in category_counts},
+        "stages": stages,
     }

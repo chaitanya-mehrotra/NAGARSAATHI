@@ -1,6 +1,6 @@
 """Complaints, public citizen feeds, soft deletion, and duplicate grouping routes."""
 
-from datetime import datetime
+from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
 
@@ -9,12 +9,27 @@ from pydantic import BaseModel, Field
 from sqlalchemy import text
 
 from app.domain.enums import Role
+from app.domain.report_status import (
+    DISPLAY_STATUS_SQL,
+    ISSUE_REVIEW_STATUSES,
+    REPORT_REVIEW_STATUSES,
+    REPORT_WITH_ISSUE_SQL,
+)
 from app.intake import report_detail
 from app.intake_schemas import Actor
 from app.routes.auth_routes import CurrentActor
 
 router = APIRouter(prefix="/api/v1", tags=["Complaints & Moderation"])
 compat_router = APIRouter(tags=["UI Compatibility"])
+
+
+def _parse_day(value: str, field: str) -> date | None:
+    if not value.strip():
+        return None
+    try:
+        return date.fromisoformat(value.strip())
+    except ValueError:
+        raise HTTPException(422, f"{field} must be a date like 2026-10-29") from None
 
 
 class SoftDeleteRequest(BaseModel):
@@ -194,8 +209,17 @@ def list_complaints(
             params["category"] = issue.strip()
 
         if status.strip():
-            conditions.append("(r.state = :status OR (r.state = 'admitted' AND :status = 'open'))")
+            conditions.append(f"({DISPLAY_STATUS_SQL}) = :status")
             params["status"] = status.strip()
+
+        # Dates are whole days in the pilot's local time, both ends inclusive.
+        since_day, until_day = _parse_day(since, "since"), _parse_day(until, "until")
+        if since_day:
+            conditions.append("(r.received_at AT TIME ZONE 'Asia/Kolkata')::date >= :since")
+            params["since"] = since_day
+        if until_day:
+            conditions.append("(r.received_at AT TIME ZONE 'Asia/Kolkata')::date <= :until")
+            params["until"] = until_day
 
         where_clause = " AND ".join(conditions)
         if sort == "newest":
@@ -205,7 +229,7 @@ def list_complaints(
         else:  # default 'priority' (prioritisation engine first)
             order_clause = "priority_score DESC, r.received_at DESC"
 
-        count_query = f"SELECT COUNT(*) FROM reports r WHERE {where_clause}"
+        count_query = f"SELECT COUNT(*) FROM {REPORT_WITH_ISSUE_SQL} WHERE {where_clause}"
         total = connection.execute(text(count_query), params).scalar_one()
 
         select_query = f"""
@@ -214,7 +238,7 @@ def list_complaints(
                 r.public_reference,
                 r.description,
                 r.claimed_category as issue_type,
-                r.state as status,
+                {DISPLAY_STATUS_SQL} as status,
                 ST_X(r.confirmed_point::geometry) as longitude,
                 ST_Y(r.confirmed_point::geometry) as latitude,
                 r.received_at as created_at,
@@ -303,7 +327,10 @@ def get_complaint_detail(report_id: UUID, request: Request, actor: CurrentActor)
         out = detail.model_dump()
         out["id"] = str(detail.id)
         out["issue_type"] = detail.claimed_category
-        out["status"] = detail.state
+        out["status"] = connection.execute(
+            text(f"SELECT {DISPLAY_STATUS_SQL} FROM {REPORT_WITH_ISSUE_SQL} WHERE r.id = :id"),
+            {"id": report_id},
+        ).scalar_one()
         out["is_suspicious"] = detail.is_suspicious
         out["suspicious_reason"] = detail.suspicious_reason
         out["latitude"] = detail.location.latitude if detail.location else None
@@ -326,10 +353,32 @@ def update_complaint_review(
 
     with request.app.state.engine.begin() as connection:
         if body.status:
-            connection.execute(
-                text("UPDATE reports SET state=:state, updated_at=NOW() WHERE id=:id"),
-                {"state": body.status, "id": report_id},
-            )
+            current = connection.execute(
+                text(f"SELECT r.state, irl.issue_id FROM {REPORT_WITH_ISSUE_SQL} WHERE r.id = :id AND r.deleted_at IS NULL"),
+                {"id": report_id},
+            ).mappings().first()
+            if current is None:
+                raise HTTPException(404, "Report not found")
+            accepted = current["state"] == "admitted" and current["issue_id"] is not None
+            if accepted and body.status in ISSUE_REVIEW_STATUSES:
+                connection.execute(
+                    text(
+                        "UPDATE issues SET status=:status, row_version=row_version+1, updated_at=NOW() WHERE id=:id"
+                    ),
+                    {"status": body.status, "id": current["issue_id"]},
+                )
+            elif not accepted and body.status in REPORT_REVIEW_STATUSES:
+                connection.execute(
+                    text("UPDATE reports SET state=:state, updated_at=NOW() WHERE id=:id"),
+                    {"state": body.status, "id": report_id},
+                )
+            else:
+                allowed = ISSUE_REVIEW_STATUSES if accepted else REPORT_REVIEW_STATUSES
+                raise HTTPException(
+                    409,
+                    f"An {'accepted' if accepted else 'unaccepted'} report can only be set to: "
+                    + ", ".join(sorted(allowed)),
+                )
         connection.execute(
             text("""
                 INSERT INTO moderation_events (report_id, action, actor_id, reason, details)

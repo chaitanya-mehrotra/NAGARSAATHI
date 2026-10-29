@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import { useLocation, useNavigate } from "react-router";
 import {
   LayoutDashboard,
   Map as MapIcon,
@@ -61,14 +62,19 @@ export const issueLabels: Record<string, string> = {
 };
 
 export const statusLabels: Record<string, string> = {
+  awaiting_review: "Under review",
   open: "Open",
   in_progress: "In progress",
   resolved: "Resolved",
-  rejected: "Rejected",
-  submitted: "Submitted",
-  awaiting_review: "Under review",
   out_of_scope: "Out of scope",
+  rejected: "Rejected",
 };
+
+// The stages a report can show, in lifecycle order (matches the API's display status).
+const stages = Object.keys(statusLabels);
+// Reviewers move a report between these before it is accepted, and its issue between these after.
+const reviewStatuses = ["awaiting_review", "out_of_scope", "rejected"];
+const acceptedStatuses = ["open", "in_progress", "resolved"];
 
 const nav: [string, any][] = [
   ["Overview", LayoutDashboard],
@@ -76,6 +82,13 @@ const nav: [string, any][] = [
   ["Complaint Map", MapIcon],
   ["My Reports", FileText],
 ];
+
+const pagePaths: Record<string, string> = {
+  Overview: "/",
+  "Report Issue": "/report",
+  "Complaint Map": "/map",
+  "My Reports": "/my-reports",
+};
 
 const fresh = () => ({
   issue_type: "pothole",
@@ -115,7 +128,7 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [src]);
-  if (failed) return <p className="location-line">Photo could not be loaded.</p>;
+  if (failed) return <p className="location-line">The photo for this report is no longer available.</p>;
   return url ? <img className={className} src={url} alt={alt} /> : null;
 }
 
@@ -129,16 +142,17 @@ function flattenMetrics(m: any): Record<string, number> {
     total: reports.total ?? 0,
     pothole: categories.pothole ?? 0,
     waterlogging: categories.waterlogging ?? 0,
-    resolved: issues.resolved ?? 0,
-    open: (reports.admitted ?? 0) + (reports.pending ?? 0),
-    in_progress: issues.active ?? 0,
-    rejected: reports.rejected ?? 0,
     suspicious: reports.suspicious ?? 0,
+    // Stage counts use the same rule as the list's status filter, so they always agree.
+    ...Object.fromEntries(stages.map((s) => [s, m.stages?.[s] ?? 0])),
   };
 }
 
 export function App() {
-  const [page, setPage] = useState<string>("Overview");
+  // Each page has its own address, so refresh and the Back button keep you where you were.
+  const location = useLocation();
+  const navigate = useNavigate();
+  const page = Object.keys(pagePaths).find((p) => pagePaths[p] === location.pathname) ?? "Overview";
   const [mobile, setMobile] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
   const [issue, setIssue] = useState<string>("");
@@ -201,7 +215,7 @@ export function App() {
   const reload = () => setRefresh((x) => x + 1);
 
   const changePage = (p: string) => {
-    setPage(p);
+    if (pagePaths[p] !== location.pathname) navigate(pagePaths[p]);
     setMobile(false);
     setOffset(0);
   };
@@ -253,24 +267,27 @@ export function App() {
     });
 
     const timer = setTimeout(() => {
-      Promise.all([
-        request(`/api/v1/complaints?${params.toString()}`),
-        request("/api/v1/metrics").catch(() => null),
-      ])
-        .then(([data, m]) => {
-          if (active) {
-            setRows(data.items || []);
-            setTotal(data.total ?? 0);
-            if (m) setMetrics(flattenMetrics(m));
-            setError("");
-          }
-        })
-        .catch((e) => {
-          if (active) setError(e.message);
-        })
-        .finally(() => {
-          if (active) setBusy(false);
-        });
+      // The counters are public; the list itself needs an account.
+      const counters = request("/api/v1/metrics").then((m) => {
+        if (active && m) setMetrics(flattenMetrics(m));
+      });
+      const list = user
+        ? request(`/api/v1/complaints?${params.toString()}`).then((data) => {
+            if (active) {
+              setRows(data.items || []);
+              setTotal(data.total ?? 0);
+            }
+          })
+        : Promise.resolve().then(() => {
+            if (active) {
+              setRows([]);
+              setTotal(null);
+            }
+          });
+      Promise.all([counters, list])
+        .then(() => active && setError(""))
+        .catch((e) => active && setError(e.message))
+        .finally(() => active && setBusy(false));
     }, 150);
 
     return () => {
@@ -278,6 +295,41 @@ export function App() {
       clearTimeout(timer);
     };
   }, [search, issue, status, date, until, sort, page, offset, refresh, user]);
+
+  // A different account (or none) must not see the previous one's list, drawer or draft report.
+  const sessionKey = user?.id ?? null;
+  const firstSession = useRef(true);
+  useEffect(() => {
+    if (firstSession.current) {
+      firstSession.current = false;
+      return;
+    }
+    setRows([]);
+    setTotal(null);
+    setSelected(null);
+    setDetail(null);
+    setForm(fresh());
+    setStep(1);
+    setSuccess(null);
+    setFormError("");
+  }, [sessionKey]);
+
+  // Escape closes the top-most dialog.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      if (deleteModal) setDeleteModal(false);
+      else if (authModal) setAuthModal(false);
+      else if (detail) closeDetails();
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [deleteModal, authModal, detail]);
+
+  // Move keyboard focus into the drawer when it opens.
+  useEffect(() => {
+    if (detail) closeRef.current?.focus();
+  }, [detail?.id]);
 
   // Sync review form when detail changes
   useEffect(() => {
@@ -303,7 +355,7 @@ export function App() {
         changePage("Overview");
       }
       setAuthModal(false);
-      notify(`Signed in as ${res.user.name} (${res.user.role.toUpperCase()})`);
+      notify(`Signed in as ${res.user.name}`);
       reload();
     } catch (err: any) {
       setAuthError(err.message || "Demo login failed");
@@ -431,6 +483,12 @@ export function App() {
         setFormError("Please mark the location on the map.");
         return;
       }
+      const lat = Number(form.latitude);
+      const lng = Number(form.longitude);
+      if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
+        setFormError("Latitude must be between -90 and 90, and longitude between -180 and 180. Click the map to place the pin.");
+        return;
+      }
       setFormError("");
       setStep(3);
     }
@@ -479,7 +537,7 @@ export function App() {
       });
 
       setSuccess(reportRes);
-      notify("Complaint successfully submitted to Bengaluru Pilot queue!");
+      notify("Report submitted");
       setForm(fresh());
       setStep(1);
       reload();
@@ -504,8 +562,8 @@ export function App() {
           priority_reason: reviewForm.priority_reason,
         }),
       });
-      setDetail(updated);
-      notify("Review updated successfully");
+      setDetail((d: any) => ({ ...d, ...updated }));
+      notify("Review saved");
       reload();
     } catch (e: any) {
       notify(`Review failed: ${e.message}`);
@@ -562,12 +620,21 @@ export function App() {
     }
   }
 
+  const returnFocus = useRef<HTMLElement | null>(null);
+
+  // Show the list row at once, then merge in the full record. Citizens may only fetch
+  // their own reports' details, so for anyone else's the row is all there is.
   const openDetails = (r: any) => {
+    returnFocus.current = document.activeElement as HTMLElement | null;
     setDetail(r);
+    request(`/api/v1/complaints/${r.id}`)
+      .then((full) => setDetail((d: any) => (d?.id === r.id ? { ...r, ...full } : d)))
+      .catch(() => {});
   };
 
   const closeDetails = () => {
     setDetail(null);
+    returnFocus.current?.focus();
   };
 
   const filterActive = search || issue || status || date || until;
@@ -581,10 +648,10 @@ export function App() {
 
   const statIcons = [FileText, Construction, Droplets, CheckCheck];
   const statCards = [
-    [isAdmin ? "Consolidated issues" : "Total reports", "total", "Individual submissions", ""],
+    ["Total reports", "total", "Every report submitted", ""],
     ["Pothole reports", "pothole", "Road surface issues", "pothole"],
     ["Waterlogging reports", "waterlogging", "Drainage & flooding", "waterlogging"],
-    ["Resolved reports", "resolved", "Issues verified resolved", "resolved"],
+    ["Resolved reports", "resolved", "Fixed and verified", "resolved"],
   ];
 
   return (
@@ -749,8 +816,7 @@ export function App() {
           {page === "Report Issue" ? (
             <>
               <div className="page-heading">
-                <div className="eyebrow">MAKE YOUR NEIGHBOURHOOD BETTER</div>
-                <h1>Report an issue</h1>
+                                <h1>Report an issue</h1>
                 <p>A photo, a pin, and a few details can make a difference.</p>
               </div>
 
@@ -800,7 +866,7 @@ export function App() {
 
                     {step === 1 ? (
                       <>
-                        <div className="section-number">STEP 01</div>
+                        <div className="section-number">Step 1 of 3</div>
                         <h2>What needs attention?</h2>
                         <p className="muted">
                           Choose the issue you noticed and tell us a little more.
@@ -864,17 +930,17 @@ export function App() {
                           {[
                             {
                               id: "critical_hazard",
-                              label: "🚨 Critical Hazard (95 pts)",
+                              label: "Critical hazard (95 pts)",
                               desc: "Fallen electric pole, live wires, or active road collapse",
                             },
                             {
                               id: "standard",
-                              label: "⚠️ Standard Defect (65 pts)",
+                              label: "Standard defect (65 pts)",
                               desc: "Deep road crater, large pothole, transit waterlogging",
                             },
                             {
                               id: "minor",
-                              label: "🟡 Minor / Small Defect (40 pts)",
+                              label: "Minor defect (40 pts)",
                               desc: "Small shallow pothole or minor residential surface wear",
                             },
                           ].map((s) => (
@@ -967,7 +1033,7 @@ export function App() {
                       </>
                     ) : step === 2 ? (
                       <>
-                        <div className="section-number">STEP 02</div>
+                        <div className="section-number">Step 2 of 3</div>
                         <h2>A clearer picture. An exact location.</h2>
                         <p className="muted">
                           Add a photo and mark where the issue actually is on the map.
@@ -1114,7 +1180,7 @@ export function App() {
                       </>
                     ) : (
                       <>
-                        <div className="section-number">STEP 03</div>
+                        <div className="section-number">Step 3 of 3</div>
                         <h2>Ready to make a difference?</h2>
                         <p className="muted">
                           Take a moment to review your complaint before submitting.
@@ -1136,7 +1202,7 @@ export function App() {
                                 border: "1px solid #fca5a5",
                               }}
                             >
-                              🚨 Critical Hazard (95 pts)
+                              Critical hazard (95 pts)
                             </span>
                           ) : form.seriousness === "minor" ? (
                             <span
@@ -1150,7 +1216,7 @@ export function App() {
                                 border: "1px solid #fde68a",
                               }}
                             >
-                              🟡 Minor Defect (40 pts)
+                              Minor defect (40 pts)
                             </span>
                           ) : (
                             <span
@@ -1164,7 +1230,7 @@ export function App() {
                                 border: "1px solid #bfdbfe",
                               }}
                             >
-                              ⚠️ Standard Defect (65 pts)
+                              Standard defect (65 pts)
                             </span>
                           )}
                           {form.analysis?.is_suspicious && (
@@ -1179,7 +1245,7 @@ export function App() {
                                 border: "1px solid #fde68a",
                               }}
                             >
-                              ⚠️ Flagged Suspicious (-35 pts)
+                              Flagged as suspicious (-35 pts)
                             </span>
                           )}
                         </div>
@@ -1230,7 +1296,7 @@ export function App() {
                                 }}
                               >
                                 <strong style={{ fontSize: "13px", color: "#334155" }}>
-                                  ⚡ Estimated priority (before photo check)
+                                  Estimated priority (before photo check)
                                 </strong>
                                 <span
                                   className={"priority-pill " + live.band}
@@ -1260,7 +1326,7 @@ export function App() {
                                     }`,
                                   }}
                                 >
-                                  ⭐ {live.score.toFixed(1)} / 100 ({live.band.toUpperCase()})
+                                  {live.score.toFixed(1)} / 100
                                 </span>
                               </div>
                               <ul
@@ -1404,8 +1470,10 @@ export function App() {
                         aria-pressed={!!active}
                         style={{ "--i": i } as React.CSSProperties}
                         onClick={() => {
-                          setIssue(filter === "resolved" ? "" : filter);
-                          setStatus(filter === "resolved" ? "resolved" : "");
+                          // Clicking the active filter again clears it, like the stage buttons.
+                          const next = active ? "" : filter;
+                          setIssue(next === "resolved" ? "" : next);
+                          setStatus(next === "resolved" ? "resolved" : "");
                         }}
                       >
                         <span className="ledger-label">
@@ -1437,14 +1505,14 @@ export function App() {
                           ? "My reports"
                           : "Neighbourhood reports"}
                       </h2>
-                      <span className="outline-badge">
-                        {total === null
-                          ? "Loading…"
-                          : `${total} ${total === 1 ? "report" : "reports"}`}
-                      </span>
+                      {user && (
+                        <span className="outline-badge">
+                          {total === null ? "Loading…" : `${total} ${total === 1 ? "report" : "reports"}`}
+                        </span>
+                      )}
                     </div>
                     <p>
-                      {total === null
+                      {!user || total === null
                         ? "Your community's reports, in one place."
                         : `Showing ${rows.length} of ${total} matching reports`}
                     </p>
@@ -1593,7 +1661,17 @@ export function App() {
                       </select>
                     </div>
 
-                    {busy ? (
+                    {!user ? (
+                      <div className="list-empty">
+                        <span className="empty-art">
+                          <ShieldCheck size={30} />
+                        </span>
+                        <p>Sign in to see the reports in your neighbourhood and follow your own.</p>
+                        <button className="primary" onClick={() => setAuthModal(true)}>
+                          Sign in
+                        </button>
+                      </div>
+                    ) : busy ? (
                       <div className="skeletons">
                         {[1, 2, 3].map((x) => (
                           <div className="skeleton" key={x} />
@@ -1679,7 +1757,18 @@ export function App() {
                             <Check size={12} />
                           </span>
                         </span>
-                        <p>No complaints match your filters.</p>
+                        <p>
+                          {filterActive
+                            ? "No reports match these filters."
+                            : page === "My Reports"
+                            ? "You haven't reported anything yet."
+                            : "No reports yet."}
+                        </p>
+                        {filterActive && (
+                          <button className="secondary" onClick={clearFilters}>
+                            Clear filters
+                          </button>
+                        )}
                       </div>
                     )}
                   </div>
@@ -1696,7 +1785,6 @@ export function App() {
                     </div>
                     <p>Every report has a next step. Pick a stage to filter the list.</p>
                     {(() => {
-                      const stages = ["open", "in_progress", "resolved", "rejected"];
                       const sum = stages.reduce((n, k) => n + (metrics?.[k] ?? 0), 0);
                       return (
                         <>
@@ -1805,25 +1893,11 @@ export function App() {
 
             {/* Suspicious Mismatch Warning Alert */}
             {detail.is_suspicious && (
-              <div
-                style={{
-                  background: "#fffbeb",
-                  border: "1px solid #f59e0b",
-                  color: "#92400e",
-                  padding: "12px 14px",
-                  borderRadius: "8px",
-                  margin: "12px 0 16px",
-                  display: "flex",
-                  alignItems: "flex-start",
-                  gap: "10px",
-                }}
-              >
-                <AlertTriangle size={20} color="#d97706" style={{ flexShrink: 0, marginTop: "2px" }} />
+              <div className="drawer-alert" role="note">
+                <AlertTriangle size={20} />
                 <div>
-                  <strong style={{ display: "block", fontSize: "14px", marginBottom: "2px" }}>
-                    Flagged as Suspicious
-                  </strong>
-                  <span style={{ fontSize: "13px" }}>
+                  <strong>Flagged as suspicious</strong>
+                  <span>
                     {detail.suspicious_reason ||
                       "Visual detector predicted a category that contradicts the citizen's claimed category. Awaiting administrator audit."}
                   </span>
@@ -1863,261 +1937,96 @@ export function App() {
               <dd>{new Date(detail.created_at).toLocaleString()}</dd>
             </dl>
 
-            {/* PRIORITISATION BREAKDOWN CARD */}
+            {/* PRIORITY BREAKDOWN */}
             {(() => {
               const pe = calculatePriorityScore(detail);
+              const band = pe.score >= 90 ? "critical" : pe.score >= 75 ? "elevated" : "routine";
               return (
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "8px",
-                    padding: "14px",
-                    margin: "14px 0",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      justifyContent: "space-between",
-                      alignItems: "center",
-                      marginBottom: "8px",
-                    }}
-                  >
-                    <strong style={{ fontSize: "13px", color: "#1e293b" }}>
-                      ⭐ Prioritisation Engine Score
-                    </strong>
-                    <span
-                      style={{
-                        padding: "3px 8px",
-                        borderRadius: "4px",
-                        fontWeight: 700,
-                        fontSize: "12px",
-                        background:
-                          pe.score >= 90
-                            ? "#fef2f2"
-                            : pe.score >= 75
-                            ? "#fffbeb"
-                            : "#f0fdf4",
-                        color:
-                          pe.score >= 90
-                            ? "#991b1b"
-                            : pe.score >= 75
-                            ? "#92400e"
-                            : "#166534",
-                        border: `1px solid ${
-                          pe.score >= 90
-                            ? "#fecaca"
-                            : pe.score >= 75
-                            ? "#fde68a"
-                            : "#bbf7d0"
-                        }`,
-                      }}
-                    >
-                      {pe.score.toFixed(1)} / 100 ({pe.band.toUpperCase()})
-                    </span>
+                <section className="drawer-panel">
+                  <div className="drawer-panel-head">
+                    <h3>Priority score</h3>
+                    <span className={"score-chip " + band}>{pe.score.toFixed(1)} / 100</span>
                   </div>
-                  <ul
-                    style={{
-                      margin: 0,
-                      paddingLeft: "16px",
-                      fontSize: "12px",
-                      color: "#475569",
-                    }}
-                  >
+                  <ul className="reason-list">
                     {pe.reasons.map((r, i) => (
-                      <li key={i} style={{ marginBottom: "3px" }}>
-                        {r}
-                      </li>
+                      <li key={i}>{r}</li>
                     ))}
                   </ul>
-                </div>
+                </section>
               );
             })()}
 
             {/* ADMIN ONLY CONTROLS */}
             {isAdmin && (
               <>
-                <div
-                  style={{
-                    background: "#f8fafc",
-                    border: "1px solid #cbd5e1",
-                    borderRadius: "8px",
-                    padding: "16px",
-                    margin: "16px 0",
-                  }}
-                >
-                  <div
-                    style={{
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px",
-                      marginBottom: "12px",
-                      color: "#b45309",
-                      fontWeight: 700,
-                      fontSize: "13px",
-                    }}
-                  >
-                    <ShieldCheck size={18} />
-                    <span>ADMINISTRATOR REVIEW & TRIAGE</span>
+                <section className="drawer-panel">
+                  <div className="drawer-panel-head">
+                    <h3>
+                      <ShieldCheck size={17} /> Review and triage
+                    </h3>
                   </div>
-
-                  <div
-                    style={{
-                      display: "grid",
-                      gridTemplateColumns: "1fr 1fr",
-                      gap: "12px",
-                      marginBottom: "12px",
-                    }}
-                  >
-                    <div>
-                      <label
-                        style={{
-                          display: "block",
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          marginBottom: "4px",
-                        }}
-                      >
-                        Status
-                      </label>
+                  <div className="field-grid">
+                    <label>
+                      Status
                       <select
                         value={reviewForm.status}
-                        onChange={(e) =>
-                          setReviewForm({ ...reviewForm, status: e.target.value })
-                        }
-                        style={{
-                          width: "100%",
-                          padding: "8px",
-                          borderRadius: "6px",
-                          border: "1px solid #cbd5e1",
-                        }}
+                        onChange={(e) => setReviewForm({ ...reviewForm, status: e.target.value })}
                       >
-                        <option value="open">Open</option>
-                        <option value="in_progress">In progress</option>
-                        <option value="resolved">Resolved</option>
-                        <option value="rejected">Rejected</option>
+                        {/* Accepted reports move through their issue's stages; others stay in review states. */}
+                        {(acceptedStatuses.includes(detail.status) ? acceptedStatuses : reviewStatuses).map((s) => (
+                          <option key={s} value={s}>
+                            {statusLabels[s]}
+                          </option>
+                        ))}
                       </select>
-                    </div>
-
-                    <div>
-                      <label
-                        style={{
-                          display: "block",
-                          fontSize: "11px",
-                          fontWeight: 600,
-                          marginBottom: "4px",
-                        }}
-                      >
-                        Priority
-                      </label>
+                    </label>
+                    <label>
+                      Priority
                       <select
                         value={reviewForm.priority}
-                        onChange={(e) =>
-                          setReviewForm({ ...reviewForm, priority: e.target.value })
-                        }
-                        style={{
-                          width: "100%",
-                          padding: "8px",
-                          borderRadius: "6px",
-                          border: "1px solid #cbd5e1",
-                        }}
+                        onChange={(e) => setReviewForm({ ...reviewForm, priority: e.target.value })}
                       >
                         <option value="low">Low</option>
                         <option value="normal">Normal</option>
                         <option value="high">High</option>
                         <option value="urgent">Urgent</option>
                       </select>
-                    </div>
-                  </div>
-
-                  <div style={{ marginBottom: "12px" }}>
-                    <label
-                      style={{
-                        display: "block",
-                        fontSize: "11px",
-                        fontWeight: 600,
-                        marginBottom: "4px",
-                      }}
-                    >
-                      Priority Reason / Review Note
                     </label>
+                  </div>
+                  <label className="field-full">
+                    Review note
                     <input
                       type="text"
-                      placeholder="Explain priority adjustment or review note"
+                      placeholder="Why the status or priority changed"
                       value={reviewForm.priority_reason}
-                      onChange={(e) =>
-                        setReviewForm({
-                          ...reviewForm,
-                          priority_reason: e.target.value,
-                        })
-                      }
-                      style={{
-                        width: "100%",
-                        padding: "8px",
-                        borderRadius: "6px",
-                        border: "1px solid #cbd5e1",
-                      }}
+                      onChange={(e) => setReviewForm({ ...reviewForm, priority_reason: e.target.value })}
                     />
-                  </div>
-
-                  <div style={{ display: "flex", gap: "8px" }}>
-                    <button
-                      className="primary"
-                      style={{ flex: 1, padding: "10px", justifyContent: "center" }}
-                      disabled={reviewSaving}
-                      onClick={handleSaveReview}
-                    >
-                      {reviewSaving ? "Saving..." : "Save Admin Review"}
+                  </label>
+                  <div className="drawer-actions">
+                    <button className="primary" disabled={reviewSaving} onClick={handleSaveReview}>
+                      {reviewSaving ? "Saving…" : "Save review"}
                     </button>
-                    <button
-                      className="secondary"
-                      style={{
-                        background: "#fee2e2",
-                        borderColor: "#fca5a5",
-                        color: "#b91c1c",
-                        padding: "10px",
-                        fontWeight: 600,
-                      }}
-                      onClick={() => setDeleteModal(true)}
-                    >
-                      <Trash2 size={16} /> Delete
+                    <button className="danger-ghost" onClick={() => setDeleteModal(true)}>
+                      <Trash2 size={15} /> Delete
                     </button>
                   </div>
-                </div>
+                </section>
 
-                {/* DEDUPLICATION ACTIONS */}
-                <div
-                  style={{
-                    background: "#f0fdf4",
-                    border: "1px solid #bbf7d0",
-                    borderRadius: "8px",
-                    padding: "14px",
-                    margin: "16px 0",
-                  }}
-                >
-                  <strong style={{ display: "block", color: "#166534", marginBottom: "4px" }}>
-                    Duplicate Resolution
-                  </strong>
-                  <p style={{ fontSize: "12px", color: "#15803d", margin: "0 0 10px" }}>
-                    Clean up multiple citizen reports for the same incident. Keeps this report and deletes all duplicate reports.
-                  </p>
-                  <button
-                    type="button"
-                    className="secondary"
-                    style={{
-                      background: "#fee2e2",
-                      borderColor: "#fca5a5",
-                      color: "#991b1b",
-                      fontWeight: 600,
-                      width: "100%",
-                      justifyContent: "center",
-                    }}
-                    onClick={handleDeduplicateKeepOne}
-                  >
-                    🗑️ Delete All Duplicates (Keep Only This Report)
-                  </button>
-                </div>
+                {detail.duplicate_count > 0 && (
+                  <section className="drawer-panel">
+                    <div className="drawer-panel-head">
+                      <h3>Duplicates</h3>
+                    </div>
+                    <p>
+                      {detail.duplicate_count} other {detail.duplicate_count === 1 ? "report describes" : "reports describe"} the
+                      same incident. Keep this one and delete the rest.
+                    </p>
+                    <button type="button" className="danger-ghost" onClick={handleDeduplicateKeepOne}>
+                      <Trash2 size={15} /> Delete {detail.duplicate_count}{" "}
+                      {detail.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                    </button>
+                  </section>
+                )}
               </>
             )}
 
@@ -2169,7 +2078,7 @@ export function App() {
             >
               <X />
             </button>
-            <div className="eyebrow">MODERATION ACTION</div>
+            <div className="drawer-kicker">Moderation</div>
             <h2>Soft Delete Complaint</h2>
             <p style={{ color: "var(--muted)", fontSize: "13px", marginBottom: "14px" }}>
               Removes this complaint from public lists while preserving auditable records.
@@ -2222,7 +2131,7 @@ export function App() {
               <X />
             </button>
 
-            <div className="eyebrow">CITIZEN & ADMIN ACCESS</div>
+            <div className="drawer-kicker">Citizen and admin access</div>
             <h2 id="auth-title">Sign In to NAGARSAATHI</h2>
             <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "16px" }}>
               Sign in with your Google account.{authOptions.demo_enabled ? " Demo accounts are available in this environment." : ""}

@@ -62,6 +62,46 @@ describe("dashboard", () => {
     expect(waterlogging).toHaveTextContent("1");
   });
 
+  it("invites signed-out visitors to sign in instead of showing an auth error", async () => {
+    stubApi({
+      "/api/v1/auth/options": { google_client_id: null, demo_enabled: false },
+      "/api/v1/metrics": {
+        reports: { total: 10 },
+        issues: {},
+        categories: { pothole: 5 },
+        stages: { awaiting_review: 7, out_of_scope: 3 },
+      },
+    });
+    renderApp();
+    expect(await screen.findByText(/Sign in to see the reports/)).toBeInTheDocument();
+    expect(screen.queryByText(/bearer/i)).not.toBeInTheDocument();
+    // Public counters still load without an account.
+    const tile = screen.getByText("Pothole reports").closest("button")!;
+    await vi.waitFor(() => expect(tile).toHaveTextContent("5"));
+  });
+
+  it("counts each stage the same way the list filters it", async () => {
+    stubApi({
+      "/api/v1/auth/options": { google_client_id: null, demo_enabled: false },
+      "/api/v1/metrics": {
+        reports: { total: 10 },
+        issues: {},
+        categories: {},
+        stages: { awaiting_review: 7, out_of_scope: 3 },
+      },
+    });
+    renderApp();
+    const underReview = (await screen.findAllByText("Under review"))
+      .map((el) => el.closest("button"))
+      .find((b) => b?.closest(".status-items"))!;
+    await vi.waitFor(() => expect(underReview).toHaveTextContent("7"));
+    const outOfScope = screen
+      .getAllByText("Out of scope")
+      .map((el) => el.closest("button"))
+      .find((b) => b?.closest(".status-items"))!;
+    expect(outOfScope).toHaveTextContent("3");
+  });
+
   it("reports a backend failure instead of showing invented complaints", async () => {
     vi.stubGlobal("fetch", vi.fn().mockRejectedValue(new Error("offline")));
     renderApp();
