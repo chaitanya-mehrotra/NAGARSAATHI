@@ -1,0 +1,1714 @@
+@import url("https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;600;700&display=swap");
+
+/*
+ * Ward ledger: the design layer for the dashboard. Loaded after style.css and
+ * overrides it selector-for-selector. Vocabulary comes from Bengaluru road
+ * markings: asphalt, Nigam green, and signal yellow used only where paint would be
+ * (the active lane, loading line, live indicator).
+ */
+:root {
+  --concrete: #e9ece8;
+  --paper: #fbfcfa;
+  --asphalt: #1d282c;
+  --asphalt-2: #27353a;
+  --ink: #1d282c;
+  --ink-soft: #4b5a5e;
+  --muted: #6b787b;
+  --rule: #d3d9d4;
+  --rule-soft: #e3e7e2;
+  --nigam: #0e5a4c;
+  --nigam-deep: #09443a;
+  --nigam-soft: #dcebe4;
+  --signal: #e8b100;
+  --pothole: #b8711d;
+  --water: #2c6e9b;
+  --resolved: #2f7d55;
+  --critical: #b3392b;
+  --progress: #6b6fb0;
+
+  --teal: var(--nigam);
+  --navy: var(--ink);
+  --border: var(--rule-soft);
+
+  --display: "Anek Latin", "Mukta", system-ui, sans-serif;
+  --body: "Mukta", system-ui, sans-serif;
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
+
+  font-family: var(--body);
+  font-size: 15px;
+  color: var(--ink);
+  background: var(--concrete);
+}
+body {
+  background: var(--concrete);
+}
+h1,
+h2,
+h3,
+.brand {
+  font-family: var(--display);
+}
+h1 {
+  font-size: 44px;
+  font-weight: 700;
+  font-stretch: 82%;
+  letter-spacing: -0.5px;
+  line-height: 1.05;
+}
+h2 {
+  font-size: 20px;
+  font-weight: 650;
+  letter-spacing: 0;
+}
+h3 {
+  font-size: 16px;
+  font-weight: 650;
+}
+p {
+  line-height: 1.55;
+}
+small {
+  font-size: 12px;
+}
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--nigam);
+  outline-offset: 2px;
+}
+button:hover:not(:disabled) {
+  filter: none;
+}
+
+/* ---------- Sidebar: asphalt with a painted lane marker ---------- */
+.sidebar {
+  background: var(--asphalt);
+  border-right: 0;
+  color: #c9d2cf;
+  padding: 28px 16px 0;
+}
+.brand {
+  color: #fff;
+  font-size: 21px;
+  font-weight: 700;
+  font-stretch: 88%;
+  letter-spacing: 0;
+}
+.brand-symbol {
+  background: var(--signal);
+  color: var(--asphalt);
+  border-radius: 12px 12px 12px 3px;
+  width: 38px;
+  height: 42px;
+  transition: transform 0.4s var(--spring);
+}
+.brand:hover .brand-symbol {
+  transform: rotate(-8deg) translateY(-2px);
+}
+.brand small {
+  font-family: var(--body);
+  font-size: 12px;
+  letter-spacing: 0;
+  color: #8c9a97;
+  margin-top: 2px;
+  font-weight: 400;
+}
+.workspace-label {
+  font-size: 12px;
+  letter-spacing: 0;
+  color: #8c9a97;
+  font-weight: 500;
+  margin: 40px 12px 10px;
+}
+.workspace-label.admin {
+  color: var(--signal);
+}
+.side-nav {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.lane-marker {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 100%;
+  height: 44px;
+  border-radius: 8px;
+  background: var(--asphalt-2);
+  transform: translateY(calc(var(--active, 0) * 48px));
+  transition: transform 0.45s var(--spring);
+  pointer-events: none;
+}
+/* The painted dashes run down the left edge of the active lane. */
+.lane-marker::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 8px;
+  bottom: 8px;
+  width: 3px;
+  border-radius: 2px;
+  background: repeating-linear-gradient(to bottom, var(--signal) 0 6px, transparent 6px 10px);
+  animation: lane-flow 1.2s linear infinite;
+  animation-play-state: paused;
+}
+.side-nav:hover .lane-marker::before {
+  animation-play-state: running;
+}
+.nav-item {
+  position: relative;
+  height: 44px;
+  margin: 0;
+  padding: 0 14px;
+  gap: 12px;
+  border-radius: 8px;
+  color: #a7b3b0;
+  font-size: 15px;
+  font-weight: 500;
+  transition: color 0.2s;
+}
+.nav-item:hover {
+  color: #fff;
+}
+.nav-item.active {
+  background: transparent;
+  color: #fff;
+  font-weight: 600;
+}
+.nav-item svg {
+  transition: transform 0.3s var(--spring);
+}
+.nav-item:hover svg {
+  transform: translateX(2px);
+}
+.together {
+  background: var(--asphalt-2);
+  border: 0;
+  border-radius: 12px;
+  padding: 18px 16px;
+  margin-bottom: 20px;
+}
+.mini-icon {
+  background: transparent;
+  color: var(--signal);
+  padding: 0;
+  margin-bottom: 10px;
+}
+.together h3 {
+  color: #fff;
+  font-size: 17px;
+  line-height: 1.25;
+}
+.together p {
+  font-size: 13px;
+  color: #95a29f;
+  line-height: 1.5;
+}
+.together button {
+  color: var(--signal);
+  font-size: 14px;
+  gap: 8px;
+}
+.together button svg {
+  transition: transform 0.25s var(--ease-out);
+}
+.together button:hover svg {
+  transform: translateX(4px);
+}
+.session {
+  border-top: 1px solid #ffffff14;
+  margin: 0 -16px;
+  padding: 16px;
+  color: #fff;
+  font-size: 14px;
+}
+.session.signed-out {
+  cursor: pointer;
+}
+.session.signed-out:hover {
+  background: var(--asphalt-2);
+}
+.session-text {
+  flex: 1;
+  min-width: 0;
+}
+.session-name {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session small {
+  font-size: 12px;
+  color: #8c9a97;
+  margin-top: 0;
+}
+.avatar {
+  width: 34px;
+  height: 34px;
+  background: var(--asphalt-2);
+  color: #fff;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.avatar.admin {
+  background: var(--signal);
+  color: var(--asphalt);
+}
+.session .icon-button {
+  color: #8c9a97;
+  border-radius: 6px;
+}
+.session .icon-button:hover {
+  color: #fff;
+  background: #ffffff14;
+}
+
+/* ---------- Top bar ---------- */
+.topbar {
+  height: 68px;
+  background: var(--concrete);
+  border-bottom: 1px solid var(--rule);
+}
+.breadcrumb {
+  font-size: 14px;
+  color: var(--muted);
+  gap: 8px;
+}
+.breadcrumb strong {
+  color: var(--ink);
+  font-weight: 600;
+}
+.top-actions {
+  gap: 14px;
+}
+.role-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--asphalt);
+  color: var(--signal);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 5px 10px;
+  border-radius: 999px;
+}
+.connection {
+  font-size: 13px;
+  color: var(--muted);
+}
+.connection.online {
+  color: var(--nigam);
+}
+.connection > span {
+  position: relative;
+}
+.connection.online > span {
+  background: var(--resolved);
+  box-shadow: none;
+}
+/* A slow radar ping: the only ambient motion on the page. */
+.connection.online > span::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 1.5px solid var(--resolved);
+  animation: ping 2.4s var(--ease-out) infinite;
+}
+.top-search {
+  margin-right: 16px;
+  width: 260px;
+}
+
+/* ---------- Buttons ---------- */
+.primary,
+.secondary {
+  border-radius: 8px;
+  padding: 9px 16px;
+  font-size: 14px;
+  font-weight: 600;
+  transition:
+    background 0.2s,
+    border-color 0.2s,
+    transform 0.15s var(--ease-out),
+    box-shadow 0.2s;
+}
+.primary {
+  background: var(--nigam);
+  box-shadow: inset 0 -2px 0 #00000026;
+}
+.primary:hover:not(:disabled) {
+  background: var(--nigam-deep);
+}
+.secondary {
+  background: var(--paper);
+  border-color: var(--rule);
+  color: var(--ink);
+}
+.secondary:hover:not(:disabled) {
+  border-color: var(--ink-soft);
+}
+.primary:active:not(:disabled),
+.secondary:active:not(:disabled),
+.map-btn:active {
+  transform: scale(0.96);
+}
+.text-button {
+  font-size: 14px;
+  color: var(--nigam);
+}
+.icon-button {
+  color: var(--muted);
+}
+
+/* ---------- Page heading ---------- */
+main {
+  padding: 36px 36px 0;
+}
+.page-heading {
+  margin-bottom: 28px;
+  animation: rise 0.6s var(--ease-out) both;
+}
+.heading-row {
+  align-items: flex-end;
+}
+.page-heading p {
+  font-size: 16px;
+  color: var(--ink-soft);
+  margin-top: 10px;
+  max-width: 62ch;
+}
+.region {
+  font-size: 13px;
+  color: var(--ink-soft);
+  background: transparent;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 6px 12px;
+}
+
+/* ---------- Ledger: one strip, four columns ---------- */
+.ledger {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  margin-bottom: 24px;
+  overflow: hidden;
+}
+.ledger-cell {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  min-width: 0;
+  padding: 20px 22px 22px;
+  border: 0;
+  border-left: 1px solid var(--rule-soft);
+  background: transparent;
+  text-align: left;
+  color: var(--ink);
+  transition: background 0.25s;
+  animation: rise 0.6s var(--ease-out) both;
+  animation-delay: calc(0.08s + var(--i, 0) * 0.07s);
+}
+.ledger-cell:first-child {
+  border-left: 0;
+}
+.ledger-cell:hover {
+  background: #f2f5f1;
+}
+.ledger-label {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--ink-soft);
+}
+.ledger-cell.pothole .ledger-label svg {
+  color: var(--pothole);
+}
+.ledger-cell.waterlogging .ledger-label svg {
+  color: var(--water);
+}
+.ledger-cell.resolved .ledger-label svg {
+  color: var(--resolved);
+}
+.ledger-value {
+  font-family: var(--display);
+  font-size: 64px;
+  font-weight: 600;
+  font-stretch: 75%;
+  line-height: 1;
+  margin: 10px 0 6px;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.ledger-cell small {
+  font-size: 13px;
+  color: var(--muted);
+}
+/* Hover paints a dashed lane line under the cell; the active filter gets a solid one. */
+.lane-dash {
+  position: absolute;
+  left: 22px;
+  right: 22px;
+  bottom: 0;
+  height: 3px;
+  background: repeating-linear-gradient(to right, var(--ink) 0 14px, transparent 14px 22px);
+  transform: scaleX(0);
+  transform-origin: left;
+  transition: transform 0.5s var(--ease-out);
+}
+.ledger-cell:hover .lane-dash {
+  transform: scaleX(1);
+}
+.ledger-cell.active {
+  background: var(--nigam-soft);
+}
+.ledger-cell.active .lane-dash {
+  background: var(--nigam);
+  transform: scaleX(1);
+}
+
+/* ---------- Workspace ---------- */
+.card {
+  background: var(--paper);
+  border: 1px solid var(--rule);
+  border-radius: 14px;
+  box-shadow: none;
+}
+.workspace {
+  position: relative;
+}
+.road-progress {
+  position: absolute;
+  inset: 0 0 auto;
+  height: 3px;
+  z-index: 2;
+  opacity: 0;
+  background: repeating-linear-gradient(to right, var(--signal) 0 16px, transparent 16px 26px);
+  background-size: 26px 3px;
+  transition: opacity 0.3s;
+}
+.road-progress.on {
+  opacity: 1;
+  animation: lane-run 0.6s linear infinite;
+}
+.workspace-header {
+  padding: 22px 24px 18px;
+}
+.panel-title {
+  gap: 10px;
+}
+.section-icon {
+  color: var(--nigam);
+}
+.outline-badge {
+  font-size: 12px;
+  color: var(--ink-soft);
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  padding: 2px 9px;
+}
+.workspace-header p {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 4px 0 0 29px;
+}
+.refresh {
+  color: var(--ink-soft);
+}
+.filter-bar {
+  padding: 0 24px 20px;
+  gap: 10px;
+}
+.search-box,
+select,
+.date-filter {
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: #fff;
+  font-size: 14px;
+  color: var(--ink-soft);
+  transition:
+    border-color 0.2s,
+    box-shadow 0.2s;
+}
+.search-box {
+  padding: 8px 12px;
+  color: var(--muted);
+}
+.search-box input {
+  font-size: 14px;
+  color: var(--ink);
+}
+.search-box:focus-within {
+  border-color: var(--nigam);
+  box-shadow: 0 0 0 3px #0e5a4c1f;
+}
+.search-box:focus-within svg {
+  color: var(--nigam);
+}
+select,
+.date-filter {
+  padding: 8px 10px;
+  max-width: 180px;
+}
+.date-filter {
+  width: 140px;
+}
+select:hover,
+.date-filter:hover {
+  border-color: var(--ink-soft);
+}
+.error-box {
+  font-size: 14px;
+  border-radius: 8px;
+  margin: 0 24px 16px;
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+.map-list {
+  grid-template-columns: minmax(0, 1fr) 360px;
+  border-top: 1px solid var(--rule-soft);
+}
+.map-wrap {
+  height: 460px;
+}
+.leaflet-map {
+  border-radius: 0 !important;
+}
+.leaflet-tile {
+  filter: saturate(0.35) contrast(0.95) brightness(1.02);
+}
+.map-actions {
+  position: absolute;
+  top: 14px;
+  right: 14px;
+  z-index: 1000;
+  display: flex;
+  gap: 8px;
+}
+.map-btn {
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  border: 1px solid var(--rule);
+  border-radius: 8px;
+  background: var(--paper);
+  color: var(--ink);
+  box-shadow: 0 1px 2px #1d282c1a;
+  transition:
+    transform 0.15s var(--ease-out),
+    background 0.2s;
+}
+.map-btn:hover {
+  background: #fff;
+}
+.map-btn svg {
+  transition: transform 0.35s var(--spring);
+}
+.map-btn:hover svg {
+  transform: scale(1.15);
+}
+.map-caption {
+  font-size: 13px;
+  color: var(--muted);
+  background: var(--paper);
+  border-top: 1px solid var(--rule-soft);
+  padding: 10px 16px;
+}
+.map-caption small {
+  font-size: 12px;
+}
+
+/* Pins drop onto the map and the selected one pulses. */
+.map-pin {
+  border-width: 2.5px;
+  box-shadow: 0 3px 8px #1d282c40;
+  animation: pin-drop 0.55s var(--spring) both;
+}
+.map-pin.pothole {
+  background: var(--pothole);
+}
+.map-pin.waterlogging {
+  background: var(--water);
+}
+.map-pin.electric_pole_fallen {
+  background: var(--critical);
+}
+.map-pin.garbage_accumulation,
+.map-pin.sewage_overflow {
+  background: #6d6a3a;
+}
+.map-pin.streetlight_failure {
+  background: #8a6d00;
+}
+.map-pin.is-selected {
+  background: var(--asphalt);
+  border-color: var(--signal);
+}
+.map-pin.is-selected::after {
+  content: "";
+  position: absolute;
+  inset: -9px;
+  border-radius: 50%;
+  border: 2px solid var(--signal);
+  animation: ping 1.8s var(--ease-out) infinite;
+}
+.custom-leaflet-marker:hover .map-pin {
+  filter: brightness(1.1);
+}
+
+/* ---------- Complaint list ---------- */
+.complaint-list {
+  border-left: 1px solid var(--rule-soft);
+  max-height: 503px;
+  background: var(--paper);
+}
+.list-heading {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--paper);
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 14px 18px;
+}
+.list-heading h3 {
+  font-size: 16px;
+}
+.list-heading select {
+  font-size: 13px;
+  max-width: 170px;
+  background: transparent;
+}
+.complaint-row {
+  position: relative;
+  display: block;
+  width: 100%;
+  background: transparent;
+  border-bottom: 1px solid var(--rule-soft);
+  padding: 16px 18px 14px 22px;
+  color: var(--ink);
+  transition: background 0.2s;
+  animation: row-in 0.45s var(--ease-out) both;
+  animation-delay: calc(var(--i, 0) * 0.04s);
+}
+/* Priority edge: a coloured kerb on the left that thickens on hover. */
+.complaint-row::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 0;
+  bottom: 0;
+  width: 3px;
+  background: var(--rule);
+  transition: width 0.25s var(--ease-out);
+}
+.complaint-row.critical::before {
+  background: var(--critical);
+}
+.complaint-row.elevated::before {
+  background: var(--signal);
+}
+.complaint-row.routine::before {
+  background: var(--resolved);
+}
+.complaint-row:hover {
+  background: #f2f5f1;
+}
+.complaint-row:hover::before {
+  width: 6px;
+}
+.complaint-row.selected {
+  background: var(--nigam-soft);
+}
+.complaint-row-top small {
+  font-size: 12px;
+  color: var(--muted);
+}
+.complaint-row h4 {
+  font-family: var(--body);
+  font-size: 15px;
+  font-weight: 600;
+  line-height: 1.35;
+  margin: 8px 0 2px;
+  color: var(--ink);
+}
+.reference {
+  display: block;
+  font-size: 12px;
+  color: var(--muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row-flags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+.priority-meter {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 650;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+}
+.meter-track {
+  display: block;
+  width: 54px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--rule-soft);
+  overflow: hidden;
+}
+.meter-track > span {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--resolved);
+  transform-origin: left;
+  animation: grow 0.8s var(--ease-out) both;
+  animation-delay: calc(0.15s + var(--i, 0) * 0.04s);
+}
+.priority-meter.critical .meter-track > span {
+  background: var(--critical);
+}
+.priority-meter.elevated .meter-track > span {
+  background: var(--signal);
+}
+.flag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 1px 8px;
+  border-radius: 999px;
+}
+.flag.duplicate {
+  background: #f4e1de;
+  color: var(--critical);
+}
+.flag.suspicious {
+  background: #f7ecc9;
+  color: #7a5a00;
+}
+.row-admin {
+  margin-top: 10px;
+}
+.danger-ghost {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #e3b9b2;
+  background: transparent;
+  color: var(--critical);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 4px 10px;
+  border-radius: 6px;
+}
+.danger-ghost:hover {
+  background: #f4e1de;
+}
+.complaint-row-bottom {
+  margin-top: 12px;
+  color: var(--muted);
+}
+.complaint-row-bottom > svg {
+  transition: transform 0.3s var(--ease-out);
+}
+.complaint-row:hover .complaint-row-bottom > svg {
+  transform: translate(3px, -3px);
+  color: var(--nigam);
+}
+.badge {
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 999px;
+  padding: 2px 9px;
+  background: #e7ebe8;
+  color: var(--ink-soft);
+}
+.badge.pothole {
+  background: #f3e6d4;
+  color: #7c4a0f;
+}
+.badge.waterlogging {
+  background: #dce9f2;
+  color: #1f5276;
+}
+.badge.electric_pole_fallen {
+  background: #f4e1de;
+  color: var(--critical);
+}
+.status {
+  font-size: 13px;
+  color: var(--ink-soft);
+  gap: 6px;
+}
+.status i {
+  width: 7px;
+  height: 7px;
+  background: var(--signal);
+}
+.status.in_progress i,
+.status.awaiting_review i,
+.status.under_review i {
+  background: var(--progress);
+}
+.status.resolved i {
+  background: var(--resolved);
+}
+.status.rejected i,
+.status.out_of_scope i {
+  background: #9aa3a0;
+}
+.skeletons {
+  padding: 16px 18px;
+}
+.skeleton {
+  height: 92px;
+  border-radius: 10px;
+  background: linear-gradient(90deg, var(--rule-soft) 0%, #f3f5f2 40%, var(--rule-soft) 80%);
+  background-size: 300% 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.list-empty p {
+  font-size: 14px;
+  color: var(--muted);
+}
+.empty-art {
+  background: var(--nigam-soft);
+  color: var(--nigam);
+  border: 0;
+  animation: bob 3s ease-in-out infinite;
+}
+
+/* ---------- Status lane + community ---------- */
+.bottom-grid {
+  grid-template-columns: 1.4fr 1fr;
+  gap: 20px;
+  margin-top: 20px;
+}
+.status-card {
+  padding: 22px 24px;
+}
+.status-card .panel-title {
+  color: var(--ink);
+}
+.status-card h3 {
+  font-size: 18px;
+}
+.status-card > p {
+  font-size: 14px;
+  color: var(--muted);
+  margin: 4px 0 18px;
+}
+.lane-bar {
+  display: flex;
+  gap: 3px;
+  height: 12px;
+  margin-bottom: 18px;
+}
+.lane-bar > span {
+  flex-basis: 0;
+  min-width: 0;
+  border-radius: 3px;
+  background: var(--signal);
+  transform-origin: left;
+  animation: grow 0.9s var(--ease-out) both;
+  animation-delay: calc(0.3s + var(--i, 0) * 0.12s);
+  transition: flex-grow 0.8s var(--ease-out);
+}
+.lane-bar .in_progress {
+  background: var(--progress);
+}
+.lane-bar .resolved {
+  background: var(--resolved);
+}
+.lane-bar .rejected {
+  background: #b9c0bd;
+}
+.status-items {
+  grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+}
+.status-items button {
+  border: 1px solid transparent;
+  border-radius: 10px;
+  padding: 10px 12px;
+  transition:
+    background 0.2s,
+    border-color 0.2s;
+}
+.status-items button:last-child {
+  border: 1px solid transparent;
+}
+.status-items button:hover {
+  background: #f2f5f1;
+}
+.status-items button.active {
+  border-color: var(--nigam);
+  background: var(--nigam-soft);
+}
+.status-items strong {
+  font-family: var(--display);
+  font-size: 36px;
+  font-weight: 600;
+  font-stretch: 75%;
+  line-height: 1.05;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink);
+  margin-top: 4px;
+}
+.community-card {
+  background: var(--asphalt);
+  border: 0;
+  border-radius: 14px;
+  color: #c9d2cf;
+  padding: 26px;
+  overflow: hidden;
+  position: relative;
+}
+/* A road's centre line crossing the card. */
+.community-card::after {
+  content: "";
+  position: absolute;
+  left: -10%;
+  right: -10%;
+  bottom: 22px;
+  height: 3px;
+  background: repeating-linear-gradient(to right, #ffffff1f 0 26px, transparent 26px 44px);
+  transition: transform 1.2s var(--ease-out);
+}
+.community-card:hover::after {
+  transform: translateX(-44px);
+}
+.community-icon {
+  background: var(--signal);
+  color: var(--asphalt);
+  border-radius: 14px;
+  transition: transform 0.5s var(--spring);
+}
+.community-card:hover .community-icon {
+  transform: rotate(4deg) scale(1.05);
+}
+.community-card h3 {
+  color: #fff;
+  font-size: 20px;
+  margin: 0 0 6px;
+}
+.community-card p {
+  font-size: 14px;
+  color: #a7b3b0;
+  margin-bottom: 10px;
+}
+.community-card .text-button {
+  font-size: 14px;
+  color: var(--signal);
+  gap: 8px;
+}
+.community-card .text-button svg {
+  transition: transform 0.25s var(--ease-out);
+}
+.community-card .text-button:hover svg {
+  transform: translateX(4px);
+}
+footer {
+  font-size: 13px;
+  color: var(--muted);
+  padding: 28px 0;
+}
+.footer-brand {
+  font-family: var(--display);
+  font-size: 14px;
+  font-weight: 700;
+  letter-spacing: 0;
+  color: var(--ink);
+  margin-right: 6px;
+}
+
+/* ---------- Drawer, modal, toast ---------- */
+.modal-backdrop {
+  background: #1d282c66;
+  backdrop-filter: blur(3px);
+  animation: fade 0.25s ease-out both;
+}
+.details-drawer {
+  background: var(--paper);
+  padding: 40px 32px;
+  box-shadow: -24px 0 60px #1d282c33;
+  animation: drawer-in 0.5s var(--ease-out) both;
+}
+.details-drawer > * {
+  animation: rise 0.5s var(--ease-out) both;
+}
+.details-drawer > :nth-child(2) {
+  animation-delay: 0.08s;
+}
+.details-drawer > :nth-child(3) {
+  animation-delay: 0.12s;
+}
+.details-drawer > :nth-child(4) {
+  animation-delay: 0.16s;
+}
+.details-drawer > :nth-child(5) {
+  animation-delay: 0.2s;
+}
+.details-drawer > :nth-child(n + 6) {
+  animation-delay: 0.24s;
+}
+.drawer-kicker {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 2px;
+}
+.details-drawer h2 {
+  font-size: 32px;
+  font-weight: 700;
+  font-stretch: 80%;
+  margin-bottom: 12px;
+}
+.details-drawer .close {
+  border-radius: 8px;
+  padding: 6px;
+  transition:
+    background 0.2s,
+    transform 0.3s var(--spring);
+}
+.details-drawer .close:hover {
+  background: var(--rule-soft);
+  transform: rotate(90deg);
+}
+.details-drawer > p {
+  font-size: 16px;
+  color: var(--ink-soft);
+  margin: 16px 0;
+}
+dl {
+  font-size: 14px;
+}
+dt {
+  color: var(--muted);
+}
+dd {
+  color: var(--ink);
+}
+.toast {
+  background: var(--asphalt);
+  border-radius: 10px;
+  padding: 13px 18px 15px;
+  font-size: 14px;
+  align-items: center;
+  overflow: hidden;
+  box-shadow: 0 12px 32px #1d282c40;
+  animation: toast-in 0.45s var(--spring) both;
+}
+.toast > svg {
+  color: var(--signal);
+}
+/* Countdown until the toast leaves (notify() clears it after 4s). */
+.toast::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  height: 3px;
+  background: var(--signal);
+  transform-origin: left;
+  animation: countdown 4s linear both;
+}
+
+/* ---------- Report wizard: lift the tiny type onto the new scale ---------- */
+.report-card h2 {
+  font-size: 28px;
+  font-stretch: 85%;
+}
+.muted {
+  font-size: 15px;
+  color: var(--muted);
+}
+.field-label {
+  font-size: 15px;
+  color: var(--ink);
+}
+.steps > div {
+  font-size: 13px;
+}
+.steps .current {
+  color: var(--nigam);
+}
+.steps .current span {
+  background: var(--nigam);
+  color: #fff;
+  transition: background 0.3s;
+}
+.issue-choice {
+  border-radius: 10px;
+  transition:
+    border-color 0.2s,
+    background 0.2s,
+    transform 0.2s var(--ease-out);
+}
+.issue-choice:hover {
+  transform: translateY(-2px);
+  border-color: var(--rule);
+}
+.issue-choice strong {
+  font-size: 14px;
+  color: var(--ink);
+}
+.issue-choice small {
+  font-size: 12px;
+}
+.issue-choice.chosen {
+  border-color: var(--nigam);
+  background: var(--nigam-soft);
+  box-shadow: none;
+}
+.choice-check {
+  animation: pop 0.35s var(--spring) both;
+}
+textarea,
+.report-card > input:not([type="file"]) {
+  font-size: 15px;
+  border-color: var(--rule);
+  border-radius: 8px;
+}
+.upload-zone {
+  border-color: var(--rule);
+  border-radius: 12px;
+  background: var(--paper);
+  transition:
+    border-color 0.2s,
+    background 0.2s;
+}
+.upload-zone:hover {
+  border-color: var(--nigam);
+  background: var(--nigam-soft);
+}
+.upload-zone strong {
+  font-size: 15px;
+  color: var(--ink);
+}
+.upload-zone span,
+.field-foot,
+.report-help small,
+.report-help > div:not(.help-icon) {
+  font-size: 13px;
+}
+.success-icon {
+  background: var(--nigam);
+  color: #fff;
+  animation: pop 0.6s var(--spring) both;
+}
+
+/* ---------- First-load splash ---------- */
+.splash {
+  --hand-off: cubic-bezier(0.65, 0, 0.35, 1);
+  position: fixed;
+  inset: 0;
+  z-index: 5000;
+  display: grid;
+  place-items: center;
+  background: var(--asphalt);
+  color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+  clip-path: inset(0 0 0 0);
+}
+.splash-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+.splash-mark {
+  position: relative;
+  display: grid;
+  place-items: center;
+}
+/* The road's centre line, painted outward from the logo across the whole screen. */
+.splash-road {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 100vw;
+  height: 4px;
+  margin: -2px 0 0 -50vw;
+  background: repeating-linear-gradient(to right, var(--signal) 0 28px, transparent 28px 48px);
+  opacity: 0.85;
+  transform: scaleX(0);
+  animation:
+    splash-paint 0.8s var(--ease-out) forwards,
+    splash-drive 0.9s linear 0.8s infinite;
+}
+.splash-logo {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  place-items: center;
+  width: 96px;
+  height: 106px;
+  border-radius: 30px 30px 30px 8px;
+  background: var(--signal);
+  color: var(--asphalt);
+  box-shadow: 0 0 0 10px var(--asphalt);
+  animation: splash-drop 0.75s var(--spring) 0.25s both;
+}
+.splash-logo svg {
+  width: 52px;
+  height: 52px;
+}
+.splash-logo path,
+.splash-logo circle {
+  stroke-dasharray: 1;
+  stroke-dashoffset: 1;
+  animation: splash-draw 0.7s var(--ease-out) 0.55s forwards;
+}
+.splash-logo circle {
+  animation-delay: 1s;
+  animation-duration: 0.4s;
+}
+.splash-ping {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 2px solid var(--signal);
+  opacity: 0;
+  animation: splash-ping 0.9s var(--ease-out) 1.1s;
+}
+.splash-name {
+  display: flex;
+  margin-top: 36px;
+  font-family: var(--display);
+  font-size: clamp(44px, 9vw, 84px);
+  font-weight: 700;
+  font-stretch: 82%;
+  line-height: 1;
+}
+/* Each letter arrives wide and narrows into the signage cut. */
+.splash-name span {
+  display: inline-block;
+  animation: splash-letter 0.7s var(--ease-out) both;
+  animation-delay: calc(0.9s + var(--i) * 0.045s);
+}
+.splash-tagline {
+  margin-top: 14px;
+  font-size: 16px;
+  color: #95a29f;
+  animation: rise 0.6s var(--ease-out) 1.5s both;
+}
+
+/* Hand-off: the asphalt shrinks into the sidebar while the logo lands on the brand mark. */
+.splash.exit {
+  pointer-events: none;
+  transition:
+    clip-path 0.8s var(--hand-off),
+    opacity 0.25s ease 0.75s;
+  opacity: 0;
+}
+.splash.exit.to-sidebar {
+  clip-path: inset(0 var(--panel-cut, 100%) 0 0);
+}
+.splash.exit.to-top {
+  clip-path: inset(0 0 100% 0);
+}
+.splash.exit .splash-road,
+.splash.exit .splash-name,
+.splash.exit .splash-tagline {
+  transition:
+    opacity 0.25s ease,
+    transform 0.4s var(--hand-off);
+  opacity: 0;
+  transform: translateY(12px);
+}
+.splash.exit .splash-road {
+  transform: scaleX(0.4);
+}
+.splash.exit .splash-logo {
+  box-shadow: 0 0 0 0 var(--asphalt);
+  transition:
+    transform 0.8s var(--hand-off),
+    box-shadow 0.3s;
+}
+.splash.exit.to-sidebar .splash-logo {
+  transform: translate(var(--fly-x), var(--fly-y)) scale(var(--fly-scale));
+}
+.splash.exit.to-top .splash-logo {
+  transform: translateY(-40px) scale(0.8);
+}
+/* Freeze the intro animations where they ended so the exit transitions take over. */
+.splash.exit .splash-logo,
+.splash.exit .splash-road,
+.splash.exit .splash-name span {
+  animation-play-state: paused;
+}
+.splash.exit .splash-logo {
+  animation: none;
+}
+
+@keyframes splash-paint {
+  to {
+    transform: scaleX(1);
+  }
+}
+@keyframes splash-drive {
+  from {
+    background-position: 0 0;
+  }
+  to {
+    background-position: -48px 0;
+  }
+}
+@keyframes splash-drop {
+  from {
+    opacity: 0;
+    transform: translateY(-120px) rotate(-14deg) scale(0.7);
+  }
+}
+@keyframes splash-draw {
+  to {
+    stroke-dashoffset: 0;
+  }
+}
+@keyframes splash-ping {
+  from {
+    opacity: 0.9;
+    transform: scale(1);
+  }
+  to {
+    opacity: 0;
+    transform: scale(1.7);
+  }
+}
+@keyframes splash-letter {
+  from {
+    opacity: 0;
+    transform: translateY(0.45em);
+    font-stretch: 125%;
+  }
+}
+
+/* ---------- Keyframes ---------- */
+@keyframes rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+  }
+}
+@keyframes row-in {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+  }
+}
+@keyframes grow {
+  from {
+    transform: scaleX(0);
+  }
+}
+@keyframes fade {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes drawer-in {
+  from {
+    transform: translateX(48px);
+    opacity: 0;
+  }
+}
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 24px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0);
+  }
+}
+@keyframes countdown {
+  to {
+    transform: scaleX(0);
+  }
+}
+@keyframes ping {
+  from {
+    transform: scale(1);
+    opacity: 0.9;
+  }
+  to {
+    transform: scale(2.6);
+    opacity: 0;
+  }
+}
+@keyframes pin-drop {
+  0% {
+    opacity: 0;
+    transform: translateY(-22px) rotate(-45deg) scale(0.6);
+  }
+  100% {
+    opacity: 1;
+    transform: rotate(-45deg);
+  }
+}
+@keyframes lane-flow {
+  to {
+    background-position: 0 10px;
+  }
+}
+@keyframes lane-run {
+  to {
+    background-position: 26px 0;
+  }
+}
+@keyframes shimmer {
+  from {
+    background-position: 100% 0;
+  }
+  to {
+    background-position: -50% 0;
+  }
+}
+@keyframes bob {
+  50% {
+    transform: translateY(-4px);
+  }
+}
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* ---------- Responsive ---------- */
+@media (min-width: 1600px) {
+  .map-wrap {
+    height: 540px;
+  }
+  .complaint-list {
+    max-height: 583px;
+  }
+}
+@media (max-width: 1200px) {
+  .ledger-value {
+    font-size: 52px;
+  }
+  .map-list {
+    grid-template-columns: minmax(0, 1fr) 300px;
+  }
+  .brand small {
+    font-size: 11px;
+  }
+}
+@media (max-width: 950px) {
+  h1 {
+    font-size: 36px;
+  }
+  .brand {
+    font-size: 18px;
+  }
+  .brand small {
+    font-size: 10px;
+    letter-spacing: 0;
+  }
+  .workspace-label {
+    font-size: 12px;
+    letter-spacing: 0;
+  }
+  .nav-item {
+    font-size: 14px;
+    padding: 0 10px;
+  }
+  .ledger {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+  .ledger-cell:nth-child(3) {
+    border-left: 0;
+  }
+  .ledger-cell:nth-child(n + 3) {
+    border-top: 1px solid var(--rule-soft);
+  }
+  .map-list {
+    grid-template-columns: minmax(0, 1fr) 260px;
+  }
+}
+@media (max-width: 740px) {
+  .sidebar {
+    top: 64px;
+    box-shadow: none;
+    transition:
+      transform 0.35s var(--ease-out),
+      box-shadow 0.35s;
+  }
+  .sidebar.open {
+    box-shadow: 15px 0 40px #1d282c40;
+  }
+  .topbar {
+    height: 64px;
+    padding: 0 16px;
+  }
+  .breadcrumb {
+    font-size: 13px;
+  }
+  .top-actions {
+    gap: 8px;
+  }
+  .top-actions .primary,
+  .top-actions .secondary {
+    font-size: 13px;
+    padding: 8px 11px;
+  }
+  .connection,
+  .role-chip {
+    display: none;
+  }
+  main {
+    padding: 24px 16px 0;
+  }
+  h1 {
+    font-size: 34px;
+  }
+  .page-heading p {
+    font-size: 15px;
+  }
+  .ledger-cell {
+    padding: 16px;
+  }
+  .ledger-label {
+    font-size: 13px;
+    align-items: flex-start;
+    min-height: 2.8em;
+  }
+  .ledger-label svg {
+    margin-top: 2px;
+  }
+  .ledger-value {
+    font-size: 44px;
+  }
+  .ledger-cell small {
+    font-size: 12px;
+  }
+  .lane-dash {
+    left: 16px;
+    right: 16px;
+  }
+  .workspace-header {
+    padding: 18px 16px;
+  }
+  .workspace-header p {
+    font-size: 13px;
+  }
+  .panel-title h2 {
+    font-size: 18px;
+  }
+  .filter-bar {
+    padding: 0 16px 16px;
+  }
+  .search-box input,
+  .filter-bar select {
+    font-size: 14px;
+  }
+  .filter-bar .date-filter {
+    font-size: 14px;
+  }
+  .error-box {
+    margin: 0 16px 16px;
+  }
+  .mobile-switch {
+    margin: 0 16px 16px;
+    border-color: var(--rule);
+    border-radius: 10px;
+    background: var(--concrete);
+  }
+  .mobile-switch button {
+    font-size: 14px;
+    border-radius: 7px;
+    transition:
+      background 0.2s,
+      color 0.2s;
+  }
+  .mobile-switch .active {
+    color: var(--nigam);
+  }
+  .map-list {
+    grid-template-columns: 1fr;
+  }
+  .map-wrap {
+    height: 400px;
+  }
+  .complaint-list {
+    border-left: 0;
+  }
+  .map-caption,
+  .map-caption small {
+    font-size: 12px;
+  }
+  .bottom-grid {
+    grid-template-columns: 1fr;
+  }
+  .status-items {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .community-card h3 {
+    font-size: 18px;
+  }
+  .community-card p {
+    font-size: 14px;
+  }
+  footer {
+    font-size: 12px;
+  }
+  footer > span:last-child {
+    max-width: 160px;
+  }
+  .footer-brand {
+    font-size: 13px;
+  }
+  .details-drawer {
+    padding: 40px 20px;
+  }
+  .toast {
+    font-size: 14px;
+  }
+  .issue-choice strong {
+    font-size: 13px;
+  }
+  .issue-choice small {
+    font-size: 11px;
+  }
+  .steps > div {
+    font-size: 12px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

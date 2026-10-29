@@ -46,14 +46,24 @@ const statusLabels: Record<string, string> = {
   out_of_scope: "Out of Scope",
 };
 
-function createPinIcon(type: string = "pothole") {
-  return L.divIcon({
-    className: "custom-leaflet-marker",
-    html: `<span class="map-pin ${type}"><span></span></span>`,
-    iconSize: [30, 36],
-    iconAnchor: [15, 36],
-    popupAnchor: [0, -32],
-  });
+// Leaflet swaps a marker's DOM whenever its icon object changes; reusing icons keeps
+// pins (and their drop-in animation) stable across unrelated re-renders.
+const pinIcons = new Map<string, L.DivIcon>();
+
+function createPinIcon(type: string = "pothole", selected = false) {
+  const key = `${type}:${selected}`;
+  let icon = pinIcons.get(key);
+  if (!icon) {
+    icon = L.divIcon({
+      className: "custom-leaflet-marker",
+      html: `<span class="map-pin ${type}${selected ? " is-selected" : ""}"><span></span></span>`,
+      iconSize: [30, 36],
+      iconAnchor: [15, 36],
+      popupAnchor: [0, -32],
+    });
+    pinIcons.set(key, icon);
+  }
+  return icon;
 }
 
 function MapController({
@@ -204,7 +214,8 @@ export default function ComplaintMap({
             <Marker
               key={row.id}
               position={[row.latitude, row.longitude]}
-              icon={createPinIcon(cat)}
+              icon={createPinIcon(cat, selected?.id === row.id)}
+              zIndexOffset={selected?.id === row.id ? 1000 : 0}
               eventHandlers={{
                 click: () => onSelect?.(row),
               }}
@@ -244,31 +255,13 @@ export default function ComplaintMap({
       </MapContainer>
 
       {/* Map Action Controls Overlay */}
-      <div
-        className="map-actions"
-        style={{
-          position: "absolute",
-          top: "12px",
-          right: "12px",
-          zIndex: 1000,
-          display: "flex",
-          gap: "8px",
-        }}
-      >
+      <div className="map-actions">
         <button
           type="button"
           className="map-btn"
           title="Fit all markers"
+          aria-label="Fit all markers"
           onClick={() => setFitTrigger((prev) => prev + 1)}
-          style={{
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: "6px",
-            padding: "8px",
-            display: "flex",
-            alignItems: "center",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-          }}
         >
           <Maximize2 size={16} />
         </button>
@@ -276,16 +269,8 @@ export default function ComplaintMap({
           type="button"
           className="map-btn"
           title="Detect my location"
+          aria-label="Detect my location"
           onClick={handleGps}
-          style={{
-            background: "#fff",
-            border: "1px solid #ccc",
-            borderRadius: "6px",
-            padding: "8px",
-            display: "flex",
-            alignItems: "center",
-            boxShadow: "0 2px 6px rgba(0,0,0,0.15)",
-          }}
         >
           <LocateFixed size={16} />
         </button>

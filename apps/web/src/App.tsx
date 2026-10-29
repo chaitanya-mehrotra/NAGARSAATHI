@@ -29,6 +29,7 @@ import {
 } from "lucide-react";
 import ComplaintMap, { MapRow } from "./components/ComplaintMap";
 import { IssueCounts, GroupingControls } from "./components/Grouping";
+import { Splash } from "./components/Splash";
 import {
   identity,
   request,
@@ -44,7 +45,9 @@ import {
   YoloAnalysisResult,
   calculatePriorityScore,
 } from "./services";
+import { CountUp } from "./motion";
 import "./style.css";
+import "./design.css";
 
 export const issueLabels: Record<string, string> = {
   electric_pole_fallen: "Fallen Electric Pole / Live Wires",
@@ -586,6 +589,8 @@ export function App() {
 
   return (
     <div className="app">
+      <Splash />
+
       {/* SIDEBAR */}
       <aside className={"sidebar " + (mobile ? "open" : "")}>
         <a
@@ -600,31 +605,28 @@ export function App() {
             <MapPin size={24} />
           </span>
           <span>
-            NAGARSAATHI<small>YOUR CITY. OUR RESPONSIBILITY.</small>
+            NagarSaathi<small>Your city, our responsibility</small>
           </span>
         </a>
 
-        <div
-          className="workspace-label"
-          style={isAdmin ? { color: "#d97706", fontWeight: 700 } : undefined}
-        >
-          {isAdmin
-            ? "PLATFORM ADMIN WORKSPACE"
-            : isNigam
-            ? "NAGAR NIGAM WORKSPACE"
-            : "CITIZEN WORKSPACE"}
+        <div className={"workspace-label" + (isAdmin ? " admin" : "")}>
+          {isAdmin ? "Admin workspace" : isNigam ? "Nagar Nigam workspace" : "Citizen workspace"}
         </div>
 
-        <nav>
+        <nav
+          className="side-nav"
+          style={{ "--active": Math.max(0, nav.findIndex(([p]) => p === page)) } as React.CSSProperties}
+        >
+          <span className="lane-marker" aria-hidden="true" />
           {nav.map(([p, Icon]) => (
             <button
               key={p}
               className={"nav-item " + (page === p ? "active" : "")}
+              aria-current={page === p ? "page" : undefined}
               onClick={() => changePage(p)}
             >
-              <Icon size={19} />
+              <Icon size={18} />
               {p}
-              {page === p && <span className="active-dot" />}
             </button>
           ))}
         </nav>
@@ -649,53 +651,30 @@ export function App() {
           </div>
 
           <div
-            className="session"
+            className={"session" + (user ? "" : " signed-out")}
             onClick={() => (!user ? setAuthModal(true) : null)}
-            style={{ cursor: user ? "default" : "pointer" }}
           >
-            <span
-              className="avatar"
-              style={
-                isAdmin
-                  ? { background: "#d97706", color: "#fff" }
-                  : undefined
-              }
-            >
-              {user ? user.name[0].toUpperCase() : "C"}
+            <span className={"avatar" + (isAdmin ? " admin" : "")}>
+              {user ? user.name[0].toUpperCase() : "?"}
             </span>
-            <div style={{ flex: 1, minWidth: 0 }}>
-              <div
-                style={{
-                  fontWeight: 600,
-                  overflow: "hidden",
-                  textOverflow: "ellipsis",
-                  whiteSpace: "nowrap",
-                }}
-              >
-                {user ? user.name : "Sign In / Register"}
-              </div>
-              <small style={{ display: "block" }}>
-                {user
-                  ? isAdmin
-                    ? "Platform Administrator"
-                    : "Citizen Account"
-                  : "Click to Authenticate"}
+            <div className="session-text">
+              <div className="session-name">{user ? user.name : "Sign in"}</div>
+              <small>
+                {user ? (isAdmin ? "Platform administrator" : "Citizen account") : "To report and track issues"}
               </small>
             </div>
-            {user ? (
+            {user && (
               <button
                 className="icon-button"
                 title="Sign out"
+                aria-label="Sign out"
                 onClick={(e) => {
                   e.stopPropagation();
                   handleLogout();
                 }}
-                style={{ padding: "4px" }}
               >
                 <X size={14} />
               </button>
-            ) : (
-              <span className="session-dot" style={{ background: "#f59e0b" }} />
             )}
           </div>
         </div>
@@ -733,18 +712,9 @@ export function App() {
 
           <div className="top-actions">
             {isAdmin && (
-              <span
-                className="badge"
-                style={{
-                  background: "#fef3c7",
-                  color: "#92400e",
-                  fontWeight: 700,
-                  padding: "6px 12px",
-                  borderRadius: "6px",
-                  fontSize: "12px",
-                }}
-              >
-                🛡️ ADMIN
+              <span className="role-chip">
+                <ShieldCheck size={14} />
+                Admin
               </span>
             )}
 
@@ -756,19 +726,11 @@ export function App() {
             </div>
 
             {user ? (
-              <button
-                className="secondary"
-                onClick={handleLogout}
-                style={{ padding: "8px 14px", fontSize: "13px" }}
-              >
+              <button className="secondary" onClick={handleLogout}>
                 Sign Out
               </button>
             ) : (
-              <button
-                className="secondary"
-                onClick={() => setAuthModal(true)}
-                style={{ padding: "8px 14px", fontSize: "13px" }}
-              >
+              <button className="secondary" onClick={() => setAuthModal(true)}>
                 Sign In
               </button>
             )}
@@ -1405,7 +1367,6 @@ export function App() {
             <>
               {/* PAGE HEADING */}
               <div className="page-heading">
-                <div className="eyebrow">BETTER STREETS START WITH US</div>
                 <div className="heading-row">
                   <h1>
                     {page === "Overview"
@@ -1415,7 +1376,7 @@ export function App() {
                       : "Every report. On the map."}
                   </h1>
                   <span className="region">
-                    <MapPin size={15} /> Bengaluru, India · Pilot Zone
+                    <MapPin size={15} /> Bengaluru southeast pilot zone
                   </span>
                 </div>
                 <p>
@@ -1429,37 +1390,33 @@ export function App() {
 
               {/* STAT METRIC CARDS */}
               {page === "Overview" && (
-                <div className="metrics">
+                <div className="ledger">
                   {statCards.map(([title, k, sub, filter], i) => {
                     const Icon = statIcons[i];
+                    const active =
+                      (issue === filter && filter && filter !== "resolved") ||
+                      (filter === "resolved" && status === "resolved");
+                    const value = metrics ? metrics[k] ?? total ?? 0 : total;
                     return (
                       <button
                         key={k}
-                        className={
-                          "metric card " +
-                          k +
-                          " " +
-                          ((issue === filter && filter && filter !== "resolved") ||
-                          (filter === "resolved" && status === "resolved")
-                            ? "metric-active"
-                            : "")
-                        }
+                        className={"ledger-cell " + k + (active ? " active" : "")}
+                        aria-pressed={!!active}
+                        style={{ "--i": i } as React.CSSProperties}
                         onClick={() => {
                           setIssue(filter === "resolved" ? "" : filter);
                           setStatus(filter === "resolved" ? "resolved" : "");
                         }}
                       >
-                        <div className="metric-top">
-                          <span className="metric-icon">
-                            <Icon size={21} />
-                          </span>
-                          <ArrowUpRight size={16} />
-                        </div>
-                        <span className="metric-label">{title}</span>
-                        <strong>
-                          {metrics ? metrics[k] ?? total ?? 0 : busy ? "…" : total ?? 0}
+                        <span className="ledger-label">
+                          <Icon size={16} />
+                          {title}
+                        </span>
+                        <strong className="ledger-value">
+                          {value === null ? "…" : <CountUp value={value} />}
                         </strong>
                         <small>{metrics ? sub : "Active complaints"}</small>
+                        <span className="lane-dash" aria-hidden="true" />
                       </button>
                     );
                   })}
@@ -1468,6 +1425,7 @@ export function App() {
 
               {/* MAIN WORKSPACE SECTION */}
               <section className="card workspace">
+                <div className={"road-progress" + (busy ? " on" : "")} aria-hidden="true" />
                 <div className="workspace-header">
                   <div>
                     <div className="panel-title">
@@ -1611,7 +1569,7 @@ export function App() {
                     <div className="map-caption">
                       <span>
                         <span className="dot live" />
-                        Bengaluru Southeast Pilot · High-Traffic Weighted Corridors
+                        Southeast Bengaluru pilot, weighted for high-traffic corridors
                       </span>
                       <small>Location is never continuously tracked.</small>
                     </div>
@@ -1642,113 +1600,77 @@ export function App() {
                         ))}
                       </div>
                     ) : rows.length ? (
-                      rows.map((r) => (
-                        <button
-                          key={r.id}
-                          className={
-                            "complaint-row " +
-                            (selected?.id === r.id ? "selected" : "")
-                          }
-                          onClick={() => {
-                            setSelected(r);
-                            openDetails(r);
-                          }}
-                        >
-                          <div className="complaint-row-top">
-                            <span className={"badge " + r.issue_type}>
-                              {issueLabels[r.issue_type] || r.issue_type}
-                            </span>
-                            {r.priority_score !== undefined && (
-                              <span
-                                className={"priority-pill " + (r.priority_band || "high")}
-                                title={r.priority_reason || `Prioritisation Score: ${r.priority_score.toFixed(1)}/100`}
-                                style={{
-                                  display: "inline-flex",
-                                  alignItems: "center",
-                                  gap: "3px",
-                                  background: r.priority_score >= 90 ? "#fef2f2" : r.priority_score >= 75 ? "#fffbeb" : "#f0fdf4",
-                                  color: r.priority_score >= 90 ? "#991b1b" : r.priority_score >= 75 ? "#92400e" : "#166534",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  padding: "2px 7px",
-                                  borderRadius: "4px",
-                                  border: `1px solid ${r.priority_score >= 90 ? "#fecaca" : r.priority_score >= 75 ? "#fde68a" : "#bbf7d0"}`
-                                }}
-                              >
-                                ⭐ {r.priority_score.toFixed(1)} Priority
+                      rows.map((r, i) => {
+                        const score: number | undefined = r.priority_score;
+                        const band = score === undefined ? "" : score >= 90 ? "critical" : score >= 75 ? "elevated" : "routine";
+                        return (
+                          <button
+                            key={r.id}
+                            className={"complaint-row " + band + (selected?.id === r.id ? " selected" : "")}
+                            style={{ "--i": Math.min(i, 12) } as React.CSSProperties}
+                            onClick={() => {
+                              setSelected(r);
+                              openDetails(r);
+                            }}
+                          >
+                            <div className="complaint-row-top">
+                              <span className={"badge " + r.issue_type}>
+                                {issueLabels[r.issue_type] || r.issue_type}
                               </span>
-                            )}
-                            {r.duplicate_count > 0 && (
-                              <span
-                                style={{
-                                  background: "#fee2e2",
-                                  color: "#991b1b",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  padding: "2px 6px",
-                                  borderRadius: "4px",
-                                  border: "1px solid #fca5a5",
-                                }}
-                              >
-                                👥 {r.duplicate_count} Duplicates
-                              </span>
-                            )}
-                            {r.is_suspicious && (
-                              <span
-                                style={{
-                                  background: "#fef3c7",
-                                  color: "#b45309",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  padding: "2px 6px",
-                                  borderRadius: "4px",
-                                  border: "1px solid #fde68a",
-                                }}
-                              >
-                                ⚠️ Suspicious
-                              </span>
-                            )}
-                            <small>
-                              {new Date(r.created_at).toLocaleDateString()}
-                            </small>
-                          </div>
-                          <h4>{r.description}</h4>
-                          <small>Report #{r.id.slice(0, 8)}</small>
-                          <span className="reference">
-                            {r.public_reference || r.id}
-                          </span>
-
-                          {isAdmin && r.duplicate_count > 0 && (
-                            <div style={{ marginTop: "6px", marginBottom: "4px" }} onClick={(e) => e.stopPropagation()}>
-                              <button
-                                type="button"
-                                className="secondary"
-                                style={{
-                                  background: "#fee2e2",
-                                  borderColor: "#fca5a5",
-                                  color: "#991b1b",
-                                  fontSize: "11px",
-                                  fontWeight: 700,
-                                  padding: "4px 8px",
-                                  borderRadius: "4px",
-                                  cursor: "pointer",
-                                }}
-                                onClick={() => triggerDeduplicateForReport(r)}
-                              >
-                                🗑️ Delete {r.duplicate_count} Duplicates (Keep #{r.public_reference || r.id.slice(0, 8)})
-                              </button>
+                              <small>{new Date(r.created_at).toLocaleDateString()}</small>
                             </div>
-                          )}
+                            <h4>{r.description}</h4>
+                            <span className="reference">{r.public_reference || `Report #${r.id.slice(0, 8)}`}</span>
 
-                          <div className="complaint-row-bottom">
-                            <span className={"status " + (r.status || "open")}>
-                              <i />
-                              {statusLabels[r.status] || r.status || "Open"}
-                            </span>
-                            <ArrowUpRight size={16} />
-                          </div>
-                        </button>
-                      ))
+                            {(score !== undefined || r.duplicate_count > 0 || r.is_suspicious) && (
+                              <div className="row-flags">
+                                {score !== undefined && (
+                                  <span
+                                    className={"priority-meter " + band}
+                                    title={r.priority_reason || `Priority score ${score.toFixed(1)} out of 100`}
+                                  >
+                                    <span className="meter-track">
+                                      <span style={{ width: `${Math.min(100, score)}%` }} />
+                                    </span>
+                                    {score.toFixed(0)}
+                                  </span>
+                                )}
+                                {r.duplicate_count > 0 && (
+                                  <span className="flag duplicate">
+                                    {r.duplicate_count} {r.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                                  </span>
+                                )}
+                                {r.is_suspicious && (
+                                  <span className="flag suspicious">
+                                    <AlertTriangle size={12} /> Suspicious
+                                  </span>
+                                )}
+                              </div>
+                            )}
+
+                            {isAdmin && r.duplicate_count > 0 && (
+                              <div className="row-admin" onClick={(e) => e.stopPropagation()}>
+                                <button
+                                  type="button"
+                                  className="danger-ghost"
+                                  onClick={() => triggerDeduplicateForReport(r)}
+                                >
+                                  <Trash2 size={13} />
+                                  Delete {r.duplicate_count} {r.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                                </button>
+                              </div>
+                            )}
+
+                            <div className="complaint-row-bottom">
+                              <span className={"status " + (r.status || "open")}>
+                                <i />
+                                {statusLabels[r.status] || r.status || "Open"}
+                              </span>
+                              <ArrowUpRight size={16} />
+                            </div>
+                          </button>
+                        );
+                      })
                     ) : (
                       <div className="list-empty">
                         <span className="empty-art">
@@ -1772,20 +1694,43 @@ export function App() {
                       <Clock size={18} />
                       <h3>From reported to resolved</h3>
                     </div>
-                    <p>Every report has a next step.</p>
-                    <div className="status-items">
-                      {["open", "in_progress", "resolved", "rejected"].map((k) => (
-                        <button key={k} onClick={() => setStatus(k)}>
-                          <span className={"status " + k}>
-                            <i />
-                            {statusLabels[k]}
-                          </span>
-                          <strong>
-                            {metrics ? metrics[k] ?? 0 : "—"}
-                          </strong>
-                        </button>
-                      ))}
-                    </div>
+                    <p>Every report has a next step. Pick a stage to filter the list.</p>
+                    {(() => {
+                      const stages = ["open", "in_progress", "resolved", "rejected"];
+                      const sum = stages.reduce((n, k) => n + (metrics?.[k] ?? 0), 0);
+                      return (
+                        <>
+                          <div className="lane-bar" aria-hidden="true">
+                            {stages.map((k, i) => (
+                              <span
+                                key={k}
+                                className={k}
+                                style={{
+                                  flexGrow: sum ? metrics?.[k] ?? 0 : 1,
+                                  "--i": i,
+                                } as React.CSSProperties}
+                              />
+                            ))}
+                          </div>
+                          <div className="status-items">
+                            {stages.map((k) => (
+                              <button
+                                key={k}
+                                className={status === k ? "active" : ""}
+                                aria-pressed={status === k}
+                                onClick={() => setStatus(status === k ? "" : k)}
+                              >
+                                <span className={"status " + k}>
+                                  <i />
+                                  {statusLabels[k]}
+                                </span>
+                                <strong>{metrics ? <CountUp value={metrics[k] ?? 0} /> : "—"}</strong>
+                              </button>
+                            ))}
+                          </div>
+                        </>
+                      );
+                    })()}
                   </section>
 
                   <section className="community-card">
@@ -1793,9 +1738,6 @@ export function App() {
                       <Construction size={28} />
                     </span>
                     <div>
-                      <span className="eyebrow">
-                        A LITTLE ACTION GOES A LONG WAY
-                      </span>
                       <h3>
                         {isAdmin
                           ? "Administrator Review & Priority Triage"
@@ -1818,12 +1760,9 @@ export function App() {
               {/* FOOTER */}
               <footer>
                 <span>
-                  <span className="footer-brand">NAGARSAATHI</span> · Built for
-                  better neighbourhoods.
+                  <span className="footer-brand">NagarSaathi</span> Built for better neighbourhoods.
                 </span>
-                <span>
-                  Bengaluru Pilot · Traffic Prioritised
-                </span>
+                <span>Bengaluru pilot, prioritised by traffic</span>
               </footer>
             </>
           )}
@@ -1832,7 +1771,7 @@ export function App() {
 
       {/* TOAST ALERT */}
       {toast && (
-        <div className="toast" role="status">
+        <div className="toast" role="status" key={toast}>
           <Check size={17} />
           {toast}
         </div>
@@ -1859,7 +1798,7 @@ export function App() {
               <X />
             </button>
 
-            <div className="eyebrow">COMPLAINT DETAILS</div>
+            <div className="drawer-kicker">Complaint</div>
             <h2 id="dialog-title">
               {detail.public_reference || `Report #${detail.id.slice(0, 8)}`}
             </h2>
