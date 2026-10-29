@@ -318,7 +318,14 @@ export function clearSession(): void {
   }
 }
 
+let runtimeApiBaseUrl: string | null = null;
+
+export function setApiBaseUrl(url: string): void {
+  runtimeApiBaseUrl = url;
+}
+
 export function getApiBaseUrl(): string {
+  if (runtimeApiBaseUrl !== null) return runtimeApiBaseUrl;
   const envUrl = (import.meta as any).env?.VITE_API_BASE_URL;
   if (envUrl) {
     return envUrl.replace(/\/$/, "");

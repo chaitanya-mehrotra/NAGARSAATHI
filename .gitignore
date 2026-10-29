@@ -13,3 +13,5 @@ __pycache__/
 *.log
 test-results/
 playwright-report/
+tools/
+logs/
