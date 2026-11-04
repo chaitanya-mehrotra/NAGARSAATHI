@@ -248,7 +248,7 @@ def list_complaints(
                 u.display_name as citizen_name,
                 COALESCE(ps.score, 
                     ROUND(
-                        CAST(GREATEST(10.0, ((CASE 
+                        CAST(LEAST(100.0, GREATEST(10.0, ((CASE
                             -- Critical life safety & fallen electric poles
                             WHEN r.claimed_category IN ('electric_pole_fallen', 'fallen_pole') OR r.description ILIKE '%electric pole%' OR r.description ILIKE '%live wire%' THEN 95.0
                             WHEN r.claimed_category = 'both' THEN 80.0
@@ -279,7 +279,7 @@ def list_complaints(
                             ELSE 1.00
                         END)
                         -- Suspicious mismatch penalty (less priority if flagged)
-                        - (CASE WHEN r.is_suspicious THEN 35.0 ELSE 0.0 END))) AS numeric), 1)
+                        - (CASE WHEN r.is_suspicious THEN 35.0 ELSE 0.0 END)))) AS numeric), 1)
                 ) as priority_score,
                 COALESCE((
                     SELECT COUNT(*) FROM issue_report_links dup_link 

@@ -1,4 +1,4 @@
-@import url("https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;600;700&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Anek+Latin:wdth,wght@75..125,300..800&family=Mukta:wght@400;500;600;700&family=Anek+Kannada:wdth,wght@75..125,300..800&family=Noto+Sans+Kannada:wght@400;500;600;700&display=swap");
 
 /*
  * Ward ledger: the design layer for the dashboard. Loaded after style.css and
@@ -30,8 +30,8 @@
   --navy: var(--ink);
   --border: var(--rule-soft);
 
-  --display: "Anek Latin", "Mukta", system-ui, sans-serif;
-  --body: "Mukta", system-ui, sans-serif;
+  --display: "Anek Latin", "Anek Kannada", "Mukta", "Noto Sans Kannada", system-ui, sans-serif;
+  --body: "Mukta", "Noto Sans Kannada", system-ui, sans-serif;
   --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
   --spring: cubic-bezier(0.34, 1.4, 0.64, 1);
 
@@ -320,6 +320,52 @@ button:hover:not(:disabled) {
   border-radius: 50%;
   border: 1.5px solid var(--resolved);
   animation: ping 2.4s var(--ease-out) infinite;
+}
+/* EN / ಕನ್ನಡ language switch */
+.lang-switch {
+  display: inline-flex;
+  padding: 3px;
+  border: 1px solid var(--rule);
+  border-radius: 999px;
+  background: var(--paper, #fff);
+}
+.lang-switch button {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1;
+  padding: 6px 11px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.lang-switch button.active {
+  background: var(--asphalt);
+  color: var(--signal);
+}
+.lang-switch button:focus-visible {
+  outline: 2px solid var(--signal);
+  outline-offset: 1px;
+}
+/* Status line under the landmark field */
+.landmark-hint {
+  min-height: 20px;
+  margin: 6px 0 4px;
+  font-size: 12px;
+  color: var(--muted);
+}
+.landmark-hint span,
+.landmark-hint .text-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.landmark-hint .text-button {
+  padding: 0;
+  font-size: 12px;
+  text-align: left;
 }
 .top-search {
   margin-right: 16px;
@@ -1706,6 +1752,14 @@ textarea,
   .connection,
   .role-chip {
     display: none;
+  }
+  /* Room for the language switch: the menu already names the page, and Report keeps its icon. */
+  .breadcrumb,
+  .top-report-label {
+    display: none;
+  }
+  .lang-switch button {
+    padding: 6px 8px;
   }
   main {
     padding: 24px 16px 0;

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { prefersReducedMotion } from "../motion";
+import { useI18n } from "../i18n";
 
 const SEEN_KEY = "nagarsaathi.splash-seen";
 const NAME = "NagarSaathi";
@@ -21,6 +22,7 @@ function alreadySeen() {
  * Shown once per browser session; click or any key skips it.
  */
 export function Splash() {
+  const { t } = useI18n();
   const [phase, setPhase] = useState<"intro" | "exit" | "done">(() =>
     prefersReducedMotion() || alreadySeen() ? "done" : "intro",
   );
@@ -96,7 +98,7 @@ export function Splash() {
             </span>
           ))}
         </div>
-        <p className="splash-tagline">Your city, our responsibility</p>
+        <p className="splash-tagline">{t("brand.tagline")}</p>
       </div>
     </div>
   );

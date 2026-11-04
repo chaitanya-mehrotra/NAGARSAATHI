@@ -1,5 +1,6 @@
 import asyncio
 import json
+import traceback
 from typing import Any
 from uuid import UUID, uuid4, uuid5
 
@@ -195,6 +196,9 @@ def process_once(
                 enqueue(connection, report_id, current["content_revision"], "admit_report")
             finish(connection, job["id"], worker)
     except Exception as error:
+        # The stored reason is generic; keep the real cause in the worker log.
+        print(f"Validation job {job['id']} failed (attempt {job['attempts']}):", flush=True)
+        traceback.print_exc()
         with engine.begin() as connection:
             fail_job(
                 connection,

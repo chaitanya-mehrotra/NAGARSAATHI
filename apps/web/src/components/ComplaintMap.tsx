@@ -10,6 +10,7 @@ import {
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { LocateFixed, Maximize2 } from "lucide-react";
+import { useI18n } from "../i18n";
 
 export interface MapRow {
   id: string | number;
@@ -24,27 +25,11 @@ export interface MapRow {
 
 const DEFAULT_CENTER: [number, number] = [12.93, 77.63]; // Southeast Bengaluru pilot center
 
-const categoryLabels: Record<string, string> = {
-  pothole: "Pothole",
-  garbage_accumulation: "Garbage",
-  sewage_overflow: "Sewage",
-  streetlight_failure: "Streetlight",
-  other_civic_issue: "Other Issue",
-};
-
-const statusLabels: Record<string, string> = {
-  submitted: "Submitted",
-  processing: "Processing",
-  awaiting_review: "Under Review",
-  open: "Open",
-  admitted: "Admitted",
-  assigned: "Assigned",
-  in_progress: "In Progress",
-  resolution_pending: "Verification Pending",
-  resolved: "Resolved",
-  rejected: "Rejected",
-  out_of_scope: "Out of Scope",
-};
+// Labels come from the shared i18n strings (issue.* / status.*).
+const knownCategories = new Set([
+  "electric_pole_fallen", "pothole", "waterlogging", "both", "garbage_accumulation",
+  "sewage_overflow", "streetlight_failure", "other_civic_issue",
+]);
 
 // Leaflet swaps a marker's DOM whenever its icon object changes; reusing icons keeps
 // pins (and their drop-in animation) stable across unrelated re-renders.
@@ -147,6 +132,7 @@ export default function ComplaintMap({
   const [fitTrigger, setFitTrigger] = useState(0);
   const [locate, setLocate] = useState<[number, number] | null>(null);
   const [error, setError] = useState("");
+  const { t } = useI18n();
 
   const tileUrl =
     (import.meta as any).env?.VITE_TILE_URL ||
@@ -157,7 +143,7 @@ export default function ComplaintMap({
 
   function handleGps() {
     if (!navigator.geolocation) {
-      setError("Geolocation is not supported by your browser. Please click the map to place a pin.");
+      setError(t("map.noGeo"));
       return;
     }
     navigator.geolocation.getCurrentPosition(
@@ -168,7 +154,7 @@ export default function ComplaintMap({
         setError("");
       },
       () => {
-        setError("Could not access your location. Please drop a pin manually on the map.");
+        setError(t("map.geoFailed"));
       },
       { timeout: 10000, enableHighAccuracy: true }
     );
@@ -197,7 +183,7 @@ export default function ComplaintMap({
         {point && (
           <Marker position={point} icon={createPinIcon("selected")}>
             <Popup>
-              <strong>Selected Location</strong>
+              <strong>{t("map.selected")}</strong>
               <br />
               {point[0].toFixed(5)}, {point[1].toFixed(5)}
             </Popup>
@@ -223,10 +209,10 @@ export default function ComplaintMap({
               <Popup>
                 <div style={{ padding: "4px" }}>
                   <div style={{ fontWeight: 700, fontSize: "14px", marginBottom: "4px" }}>
-                    {categoryLabels[cat] || cat}
+                    {knownCategories.has(cat) ? t(`issue.${cat}`) : cat}
                   </div>
                   <div style={{ fontSize: "12px", color: "#666", marginBottom: "8px" }}>
-                    Status: <strong>{statusLabels[st] || st}</strong>
+                    {t("map.status")} <strong>{t(`status.${st}`)}</strong>
                   </div>
                   {row.description && (
                     <p style={{ fontSize: "12px", margin: "0 0 8px 0", maxWidth: "200px" }}>
@@ -244,7 +230,7 @@ export default function ComplaintMap({
                         onDetails(row);
                       }}
                     >
-                      View Details
+                      {t("map.details")}
                     </button>
                   )}
                 </div>
@@ -259,8 +245,8 @@ export default function ComplaintMap({
         <button
           type="button"
           className="map-btn"
-          title="Fit all markers"
-          aria-label="Fit all markers"
+          title={t("map.fit")}
+          aria-label={t("map.fit")}
           onClick={() => setFitTrigger((prev) => prev + 1)}
         >
           <Maximize2 size={16} />
@@ -268,8 +254,8 @@ export default function ComplaintMap({
         <button
           type="button"
           className="map-btn"
-          title="Detect my location"
-          aria-label="Detect my location"
+          title={t("map.locate")}
+          aria-label={t("map.locate")}
           onClick={handleGps}
         >
           <LocateFixed size={16} />

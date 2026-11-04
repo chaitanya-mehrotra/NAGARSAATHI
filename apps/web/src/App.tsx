@@ -47,6 +47,8 @@ import {
   calculatePriorityScore,
 } from "./services";
 import { CountUp } from "./motion";
+import { useI18n } from "./i18n";
+import { nearbyLandmark } from "./geocode";
 import "./style.css";
 import "./design.css";
 
@@ -98,6 +100,8 @@ const fresh = () => ({
   latitude: 12.9172,
   longitude: 77.6228,
   landmark: "",
+  // Once the citizen types in the landmark field, the map lookup stops overwriting it.
+  landmarkEdited: false,
   confirmed: true,
   analysis: null as YoloAnalysisResult | null,
   forceMismatch: false,
@@ -105,6 +109,7 @@ const fresh = () => ({
 
 /** Photos need the bearer token, which a plain <img src> cannot send: fetch and show a blob. */
 function AuthImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
+  const { t } = useI18n();
   const [url, setUrl] = useState("");
   const [failed, setFailed] = useState(false);
   useEffect(() => {
@@ -128,7 +133,7 @@ function AuthImage({ src, alt, className }: { src: string; alt: string; classNam
       if (objectUrl) URL.revokeObjectURL(objectUrl);
     };
   }, [src]);
-  if (failed) return <p className="location-line">The photo for this report is no longer available.</p>;
+  if (failed) return <p className="location-line">{t("photo.missing")}</p>;
   return url ? <img className={className} src={url} alt={alt} /> : null;
 }
 
@@ -152,7 +157,10 @@ export function App() {
   // Each page has its own address, so refresh and the Back button keep you where you were.
   const location = useLocation();
   const navigate = useNavigate();
-  const page = Object.keys(pagePaths).find((p) => pagePaths[p] === location.pathname) ?? "Overview";
+  const { t, lang, setLang, locale } = useI18n();
+  const issueName = (k: string) => (issueLabels[k] ? t(`issue.${k}`) : k);
+  const statusName = (k: string) => (statusLabels[k] ? t(`status.${k}`) : k);
+  const page =Object.keys(pagePaths).find((p) => pagePaths[p] === location.pathname) ?? "Overview";
   const [mobile, setMobile] = useState<boolean>(false);
   const [search, setSearch] = useState<string>("");
   const [issue, setIssue] = useState<string>("");
@@ -208,6 +216,8 @@ export function App() {
   const [saving, setSaving] = useState<boolean>(false);
   const [preview, setPreview] = useState<string>("");
   const [success, setSuccess] = useState<any | null>(null);
+  const [landmarkLookup, setLandmarkLookup] = useState<"idle" | "looking" | "found" | "failed">("idle");
+  const [suggestedLandmark, setSuggestedLandmark] = useState("");
 
   const fileInput = useRef<HTMLInputElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
@@ -220,7 +230,16 @@ export function App() {
     setOffset(0);
   };
 
-  const report = () => changePage(isNigam ? "Overview" : "Report Issue");
+  const report = () => {
+    if (!isNigam) return changePage("Report Issue");
+    // Staff are usually already on Overview, so navigating alone does nothing visible:
+    // switch to the list view and scroll the complaint list into view.
+    changePage("Overview");
+    setView("list");
+    setTimeout(() => {
+      document.getElementById("complaints")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 50);
+  };
 
   function notify(t: string) {
     setToast(t);
@@ -248,6 +267,33 @@ export function App() {
     setPreview(url);
     return () => URL.revokeObjectURL(url);
   }, [form.file]);
+
+  // Suggest a nearby landmark for the pin. Waits for the pin to settle, cancels stale lookups,
+  // and never overwrites a landmark the citizen typed themselves.
+  const onLocationStep = page === "Report Issue" && step === 2 && !success;
+  useEffect(() => {
+    if (!onLocationStep) return;
+    const lat = Number(form.latitude);
+    const lng = Number(form.longitude);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) return;
+    const controller = new AbortController();
+    setLandmarkLookup("looking");
+    const timer = setTimeout(() => {
+      nearbyLandmark(lat, lng, lang, controller.signal)
+        .then((name) => {
+          setSuggestedLandmark(name ?? "");
+          setLandmarkLookup(name ? "found" : "failed");
+          if (name) setForm((f) => (f.landmarkEdited ? f : { ...f, landmark: name }));
+        })
+        .catch((e) => {
+          if (e?.name !== "AbortError") setLandmarkLookup("failed");
+        });
+    }, 600);
+    return () => {
+      clearTimeout(timer);
+      controller.abort();
+    };
+  }, [onLocationStep, form.latitude, form.longitude, lang]);
 
   // Fetch complaints and metrics
   useEffect(() => {
@@ -355,10 +401,10 @@ export function App() {
         changePage("Overview");
       }
       setAuthModal(false);
-      notify(`Signed in as ${res.user.name}`);
+      notify(t("toast.signedInAs", { name: res.user.name }));
       reload();
     } catch (err: any) {
-      setAuthError(err.message || "Demo login failed");
+      setAuthError(err.message || t("err.demoLogin"));
     } finally {
       setAuthLoading(false);
     }
@@ -390,6 +436,7 @@ export function App() {
                 shape: "rectangular",
                 text: "continue_with",
                 width: 360,
+                locale: lang,
               });
             }
           } catch (e) {
@@ -403,7 +450,7 @@ export function App() {
         clearTimeout(t);
       };
     }
-  }, [authModal, authTab, authOptions.google_client_id, gsiAttempt]);
+  }, [authModal, authTab, authOptions.google_client_id, gsiAttempt, lang]);
 
   async function handleGoogleCredentialResponse(response: any) {
     if (!response?.credential) return;
@@ -413,10 +460,10 @@ export function App() {
       const res = await loginWithGoogle({ credential: response.credential });
       setUser(res.user);
       setAuthModal(false);
-      notify(`Signed in with Google as ${res.user.name}`);
+      notify(t("toast.signedInGoogle", { name: res.user.name }));
       reload();
     } catch (err: any) {
-      setAuthError(err.message || "Google Sign-In failed");
+      setAuthError(err.message || t("err.googleLogin"));
     } finally {
       setAuthLoading(false);
       setGsiAttempt((n) => n + 1); // the used nonce is spent; fetch a new one
@@ -425,19 +472,15 @@ export function App() {
 
   // Admin Direct Duplicate Cleanup from List
   async function triggerDeduplicateForReport(report: any) {
-    if (
-      !window.confirm(
-        `Are you sure you want to delete all other duplicate complaints associated with this incident and keep only #${report.public_reference || report.id.slice(0, 8)}?`
-      )
-    ) {
+    if (!window.confirm(t("confirm.dedup", { ref: report.public_reference || report.id.slice(0, 8) }))) {
       return;
     }
     try {
       const res = await deduplicateKeepOne(report.id);
-      notify(res.message || "Duplicates deleted successfully");
+      notify(res.message || t("toast.dedupDone"));
       reload();
     } catch (e: any) {
-      notify(`Deduplication failed: ${e.message}`);
+      notify(t("toast.dedupFailed", { msg: e.message }));
     }
   }
 
@@ -446,18 +489,18 @@ export function App() {
     await logout();
     setUser(null);
     setDetail(null);
-    notify("Signed out");
+    notify(t("toast.signedOut"));
     reload();
   }
 
   // File selection
   function chooseFile(file: File) {
     if (file.size > 15 * 1024 * 1024) {
-      setFormError("Photo exceeds maximum limit of 15MB");
+      setFormError(t("err.photoSize"));
       return;
     }
     if (!["image/jpeg", "image/png", "image/webp"].includes(file.type)) {
-      setFormError("Please select a valid image (JPEG, PNG, or WebP)");
+      setFormError(t("err.photoType"));
       return;
     }
     setFormError("");
@@ -469,24 +512,24 @@ export function App() {
   function nextStep() {
     if (step === 1) {
       if (form.description.trim().length < 5) {
-        setFormError("Please describe the civic issue (at least 5 characters).");
+        setFormError(t("err.desc"));
         return;
       }
       setFormError("");
       setStep(2);
     } else if (step === 2) {
       if (!form.file) {
-        setFormError("Please upload a photo of the civic issue.");
+        setFormError(t("err.photo"));
         return;
       }
       if (!form.latitude || !form.longitude) {
-        setFormError("Please mark the location on the map.");
+        setFormError(t("err.pin"));
         return;
       }
       const lat = Number(form.latitude);
       const lng = Number(form.longitude);
       if (!Number.isFinite(lat) || !Number.isFinite(lng) || Math.abs(lat) > 90 || Math.abs(lng) > 180) {
-        setFormError("Latitude must be between -90 and 90, and longitude between -180 and 180. Click the map to place the pin.");
+        setFormError(t("err.coords"));
         return;
       }
       setFormError("");
@@ -498,7 +541,7 @@ export function App() {
   async function submitComplaint() {
     if (!user) {
       setAuthModal(true);
-      notify("Please sign in before submitting a complaint.");
+      notify(t("toast.signInFirst"));
       return;
     }
     setSaving(true);
@@ -532,17 +575,20 @@ export function App() {
             confirmed: form.confirmed,
           },
           location_source: "confirmed_pin",
-          address_text: form.landmark || undefined,
+          address_text: form.landmark.trim() || undefined,
+          language_hint: lang,
         }),
       });
 
       setSuccess(reportRes);
-      notify("Report submitted");
+      notify(t("toast.submitted"));
       setForm(fresh());
       setStep(1);
+      setLandmarkLookup("idle");
+      setSuggestedLandmark("");
       reload();
     } catch (err: any) {
-      setFormError(err.message || "Failed to submit complaint");
+      setFormError(err.message || t("err.submit"));
     } finally {
       setSaving(false);
     }
@@ -563,10 +609,10 @@ export function App() {
         }),
       });
       setDetail((d: any) => ({ ...d, ...updated }));
-      notify("Review saved");
+      notify(t("toast.reviewSaved"));
       reload();
     } catch (e: any) {
-      notify(`Review failed: ${e.message}`);
+      notify(t("toast.reviewFailed", { msg: e.message }));
     } finally {
       setReviewSaving(false);
     }
@@ -576,7 +622,7 @@ export function App() {
   async function handleSoftDelete() {
     if (!detail) return;
     if (!deleteReason.trim()) {
-      notify("Deletion reason is mandatory for moderation audit");
+      notify(t("toast.reasonRequired"));
       return;
     }
     setDeleteBusy(true);
@@ -586,13 +632,13 @@ export function App() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ reason: deleteReason }),
       });
-      notify("Complaint soft-deleted. Audit event recorded.");
+      notify(t("toast.deleted"));
       setDeleteModal(false);
       setDeleteReason("");
       setDetail(null);
       reload();
     } catch (e: any) {
-      notify(`Soft delete failed: ${e.message}`);
+      notify(t("toast.deleteFailed", { msg: e.message }));
     } finally {
       setDeleteBusy(false);
     }
@@ -601,22 +647,18 @@ export function App() {
   // Admin Deduplicate: Keep 1 & Delete All Duplicates
   async function handleDeduplicateKeepOne() {
     if (!detail) return;
-    if (
-      !window.confirm(
-        `Are you sure you want to delete all other duplicate complaints associated with this issue and keep only Report #${detail.id}?`
-      )
-    ) {
+    if (!window.confirm(t("confirm.dedup", { ref: detail.public_reference || detail.id }))) {
       return;
     }
 
     try {
       const res = await deduplicateKeepOne(detail.id);
-      notify(res.message || "Duplicates deleted successfully");
+      notify(res.message || t("toast.dedupDone"));
       const updated = await request(`/api/v1/complaints/${detail.id}`);
       setDetail(updated);
       reload();
     } catch (e: any) {
-      notify(`Deduplication failed: ${e.message}`);
+      notify(t("toast.dedupFailed", { msg: e.message }));
     }
   }
 
@@ -648,10 +690,10 @@ export function App() {
 
   const statIcons = [FileText, Construction, Droplets, CheckCheck];
   const statCards = [
-    ["Total reports", "total", "Every report submitted", ""],
-    ["Pothole reports", "pothole", "Road surface issues", "pothole"],
-    ["Waterlogging reports", "waterlogging", "Drainage & flooding", "waterlogging"],
-    ["Resolved reports", "resolved", "Fixed and verified", "resolved"],
+    [t("stat.total"), "total", t("stat.total.sub"), ""],
+    [t("stat.pothole"), "pothole", t("stat.pothole.sub"), "pothole"],
+    [t("stat.waterlogging"), "waterlogging", t("stat.waterlogging.sub"), "waterlogging"],
+    [t("stat.resolved"), "resolved", t("stat.resolved.sub"), "resolved"],
   ];
 
   return (
@@ -672,12 +714,12 @@ export function App() {
             <MapPin size={24} />
           </span>
           <span>
-            NagarSaathi<small>Your city, our responsibility</small>
+            NagarSaathi<small>{t("brand.tagline")}</small>
           </span>
         </a>
 
         <div className={"workspace-label" + (isAdmin ? " admin" : "")}>
-          {isAdmin ? "Admin workspace" : isNigam ? "Nagar Nigam workspace" : "Citizen workspace"}
+          {isAdmin ? t("workspace.admin") : isNigam ? t("workspace.nigam") : t("workspace.citizen")}
         </div>
 
         <nav
@@ -693,7 +735,7 @@ export function App() {
               onClick={() => changePage(p)}
             >
               <Icon size={18} />
-              {p}
+              {t(`nav.${p}`)}
             </button>
           ))}
         </nav>
@@ -704,15 +746,13 @@ export function App() {
               <ShieldCheck size={22} />
             </span>
             <h3>
-              Small reports.
+              {t("side.title1")}
               <br />
-              Better neighbourhoods.
+              {t("side.title2")}
             </h3>
-            <p>
-              Be the eyes of your city. Every issue you report is a step forward.
-            </p>
+            <p>{t("side.body")}</p>
             <button onClick={report}>
-              {isAdmin ? "View all complaints" : "Make a difference"}{" "}
+              {isAdmin ? t("side.viewAll") : t("side.cta")}{" "}
               <ArrowRight size={15} />
             </button>
           </div>
@@ -725,16 +765,16 @@ export function App() {
               {user ? user.name[0].toUpperCase() : "?"}
             </span>
             <div className="session-text">
-              <div className="session-name">{user ? user.name : "Sign in"}</div>
+              <div className="session-name">{user ? user.name : t("session.signIn")}</div>
               <small>
-                {user ? (isAdmin ? "Platform administrator" : "Citizen account") : "To report and track issues"}
+                {user ? (isAdmin ? t("session.admin") : t("session.citizen")) : t("session.prompt")}
               </small>
             </div>
             {user && (
               <button
                 className="icon-button"
-                title="Sign out"
-                aria-label="Sign out"
+                title={t("session.signOut")}
+                aria-label={t("session.signOut")}
                 onClick={(e) => {
                   e.stopPropagation();
                   handleLogout();
@@ -754,21 +794,21 @@ export function App() {
           <button
             className="mobile-menu icon-button"
             onClick={() => setMobile(!mobile)}
-            aria-label="Toggle navigation"
+            aria-label={t("top.toggleNav")}
           >
             <Menu />
           </button>
 
           <div className="breadcrumb">
-            Workspace <ChevronRight size={14} />
-            <strong>{page}</strong>
+            {t("top.workspace")} <ChevronRight size={14} />
+            <strong>{t(`nav.${page}`)}</strong>
           </div>
 
           <div className="top-search search-box">
             <Search size={16} />
             <input
-              aria-label="Search all complaints"
-              placeholder="Search complaints…"
+              aria-label={t("top.searchAll")}
+              placeholder={t("top.searchPh")}
               value={search}
               onChange={(e) => {
                 setSearch(e.target.value);
@@ -781,7 +821,7 @@ export function App() {
             {isAdmin && (
               <span className="role-chip">
                 <ShieldCheck size={14} />
-                Admin
+                {t("top.admin")}
               </span>
             )}
 
@@ -789,23 +829,38 @@ export function App() {
               className={"connection " + (connection === "Live" ? "online" : "")}
             >
               <span />
-              {connection}
+              {connection === "Live" ? t("top.live") : connection}
+            </div>
+
+            <div className="lang-switch" role="group" aria-label={t("lang.label")}>
+              {(["en", "kn"] as const).map((l) => (
+                <button
+                  key={l}
+                  type="button"
+                  lang={l}
+                  className={lang === l ? "active" : ""}
+                  aria-pressed={lang === l}
+                  onClick={() => setLang(l)}
+                >
+                  {l === "en" ? "EN" : t("lang.kn")}
+                </button>
+              ))}
             </div>
 
             {user ? (
               <button className="secondary" onClick={handleLogout}>
-                Sign Out
+                {t("top.signOut")}
               </button>
             ) : (
               <button className="secondary" onClick={() => setAuthModal(true)}>
-                Sign In
+                {t("top.signIn")}
               </button>
             )}
 
             {!isNigam && (
-              <button className="primary" onClick={report}>
+              <button className="primary top-report" onClick={report} aria-label={t("top.report")}>
                 <Plus size={17} />
-                Report Issue
+                <span className="top-report-label">{t("top.report")}</span>
               </button>
             )}
           </div>
@@ -816,8 +871,8 @@ export function App() {
           {page === "Report Issue" ? (
             <>
               <div className="page-heading">
-                                <h1>Report an issue</h1>
-                <p>A photo, a pin, and a few details can make a difference.</p>
+                <h1>{t("report.title")}</h1>
+                <p>{t("report.subtitle")}</p>
               </div>
 
               {success ? (
@@ -825,24 +880,24 @@ export function App() {
                   <div className="success-icon">
                     <Check size={32} />
                   </div>
-                  <h2>Thank you for speaking up.</h2>
-                  <p>Your complaint has been permanently saved to the database.</p>
+                  <h2>{t("success.title")}</h2>
+                  <p>{t("success.body")}</p>
                   <div style={{ margin: "16px 0", fontSize: "16px" }}>
-                    <strong>{success.public_reference || `Report #${success.id}`}</strong> ·
-                    Status:{" "}
+                    <strong>{success.public_reference || t("common.reportNo", { id: success.id })}</strong> ·{" "}
+                    {t("success.status")}{" "}
                     <span className="status open">
-                      <i /> Open
+                      <i /> {t("status.open")}
                     </span>
                   </div>
                   <div className="button-row">
                     <button className="primary" onClick={() => setSuccess(null)}>
-                      Submit Another Report
+                      {t("success.another")}
                     </button>
                     <button
                       className="secondary"
                       onClick={() => changePage("My Reports")}
                     >
-                      View My Reports
+                      {t("success.mine")}
                     </button>
                   </div>
                 </section>
@@ -850,11 +905,7 @@ export function App() {
                 <div className="report-layout">
                   <section className="report-card card">
                     <div className="steps">
-                      {[
-                        "Issue details",
-                        "Photo & location",
-                        "Review & submit",
-                      ].map((x, i) => (
+                      {[t("steps.1"), t("steps.2"), t("steps.3")].map((x, i) => (
                         <div key={x} className={step >= i + 1 ? "current" : ""}>
                           <span>
                             {step > i + 1 ? <Check size={15} /> : i + 1}
@@ -866,24 +917,27 @@ export function App() {
 
                     {step === 1 ? (
                       <>
-                        <div className="section-number">Step 1 of 3</div>
-                        <h2>What needs attention?</h2>
-                        <p className="muted">
-                          Choose the issue you noticed and tell us a little more.
-                        </p>
+                        <div className="section-number">{t("steps.of", { n: 1 })}</div>
+                        <h2>{t("s1.title")}</h2>
+                        <p className="muted">{t("s1.sub")}</p>
 
                         <label className="field-label">
-                          Issue type <span>*</span>
+                          {t("s1.type")} <span>*</span>
                         </label>
                         <div className="issue-choices">
                           {[
-                            { key: "electric_pole_fallen", label: "Electric Pole Fallen", desc: "Exposed wires / fallen pole hazard", icon: AlertTriangle },
-                            { key: "pothole", label: "Pothole", desc: "Damaged road surface", icon: Construction },
-                            { key: "waterlogging", label: "Waterlogging", desc: "Standing or flooding water", icon: Droplets },
-                            { key: "both", label: "Both Issues", desc: "Pothole and waterlogging", icon: MapPin },
-                            { key: "garbage_accumulation", label: "Garbage Pile", desc: "Waste accumulation on road", icon: Trash2 },
-                            { key: "streetlight_failure", label: "Streetlight Failure", desc: "Dark road / broken light", icon: ShieldCheck },
-                          ].map(({ key, label, desc, icon: Icon }) => (
+                            { key: "electric_pole_fallen", icon: AlertTriangle },
+                            { key: "pothole", icon: Construction },
+                            { key: "waterlogging", icon: Droplets },
+                            { key: "both", icon: MapPin },
+                            { key: "garbage_accumulation", icon: Trash2 },
+                            { key: "streetlight_failure", icon: ShieldCheck },
+                          ].map(({ key, icon: Icon }) => ({
+                            key,
+                            icon: Icon,
+                            label: t(`choice.${key}`),
+                            desc: t(`choice.${key}.desc`),
+                          })).map(({ key, label, desc, icon: Icon }) => (
                             <button
                               key={key}
                               type="button"
@@ -917,7 +971,7 @@ export function App() {
                         </div>
 
                         <label className="field-label">
-                          Seriousness & Hazard Level <span>*</span>
+                          {t("sev.label")} <span>*</span>
                         </label>
                         <div
                           style={{
@@ -927,23 +981,11 @@ export function App() {
                             marginBottom: "16px",
                           }}
                         >
-                          {[
-                            {
-                              id: "critical_hazard",
-                              label: "Critical hazard (95 pts)",
-                              desc: "Fallen electric pole, live wires, or active road collapse",
-                            },
-                            {
-                              id: "standard",
-                              label: "Standard defect (65 pts)",
-                              desc: "Deep road crater, large pothole, transit waterlogging",
-                            },
-                            {
-                              id: "minor",
-                              label: "Minor defect (40 pts)",
-                              desc: "Small shallow pothole or minor residential surface wear",
-                            },
-                          ].map((s) => (
+                          {["critical_hazard", "standard", "minor"].map((id) => ({
+                            id,
+                            label: t(`sev.${id}`),
+                            desc: t(`sev.${id}.desc`),
+                          })).map((s) => (
                             <button
                               key={s.id}
                               type="button"
@@ -989,13 +1031,13 @@ export function App() {
                         </div>
 
                         <label className="field-label" htmlFor="description">
-                          Description *
+                          {t("desc.label")} *
                         </label>
                         <textarea
                           id="description"
                           maxLength={500}
                           rows={6}
-                          placeholder="What did you notice? Include details that will help municipal staff understand the issue."
+                          placeholder={t("desc.ph")}
                           value={form.description}
                           onChange={(e) => {
                             const val = e.target.value;
@@ -1006,14 +1048,17 @@ export function App() {
                             if (
                               lower.includes("electric pole") ||
                               lower.includes("live wire") ||
-                              lower.includes("sparking")
+                              lower.includes("sparking") ||
+                              val.includes("ವಿದ್ಯುತ್ ಕಂಬ") ||
+                              val.includes("ವಿದ್ಯುತ್ ತಂತಿ")
                             ) {
                               detectedIssue = "electric_pole_fallen";
                               detectedSeriousness = "critical_hazard";
                             } else if (
                               lower.includes("small") ||
                               lower.includes("minor") ||
-                              lower.includes("shallow")
+                              lower.includes("shallow") ||
+                              val.includes("ಸಣ್ಣ")
                             ) {
                               detectedSeriousness = "minor";
                             }
@@ -1027,17 +1072,15 @@ export function App() {
                           }}
                         />
                         <div className="field-foot">
-                          <span>At least 5 characters. Avoid personal information.</span>
+                          <span>{t("desc.hint")}</span>
                           <span>{form.description.trim().length}/500</span>
                         </div>
                       </>
                     ) : step === 2 ? (
                       <>
-                        <div className="section-number">Step 2 of 3</div>
-                        <h2>A clearer picture. An exact location.</h2>
-                        <p className="muted">
-                          Add a photo and mark where the issue actually is on the map.
-                        </p>
+                        <div className="section-number">{t("steps.of", { n: 2 })}</div>
+                        <h2>{t("s2.title")}</h2>
+                        <p className="muted">{t("s2.sub")}</p>
 
                         <input
                           ref={fileInput}
@@ -1051,21 +1094,21 @@ export function App() {
 
                         {preview ? (
                           <div className="photo-preview">
-                            <img src={preview} alt="Complaint preview" />
+                            <img src={preview} alt={t("photo.alt")} />
                             <div className="button-row">
                               <button
                                 type="button"
                                 className="secondary"
                                 onClick={() => fileInput.current?.click()}
                               >
-                                Replace photo
+                                {t("photo.replace")}
                               </button>
                               <button
                                 type="button"
                                 className="text-button"
                                 onClick={() => setForm({ ...form, file: null, analysis: null })}
                               >
-                                Remove
+                                {t("photo.remove")}
                               </button>
                             </div>
                           </div>
@@ -1083,26 +1126,20 @@ export function App() {
                             }}
                           >
                             <Upload size={28} />
-                            <strong>Click to upload or drag and drop</strong>
-                            <span>JPEG, PNG or WebP · Up to 15 MB</span>
+                            <strong>{t("photo.upload")}</strong>
+                            <span>{t("photo.types")}</span>
                           </button>
                         )}
 
                         {form.file && (
                           <p style={{ marginTop: "12px", fontSize: "12px", color: "var(--muted)" }}>
-                            Your photo is checked automatically after you submit. If it does not
-                            appear to match the issue you selected, the report is kept and flagged
-                            for human review.
+                            {t("photo.check")}
                           </p>
                         )}
 
-
-
                         <div className="location-heading">
-                          <label className="field-label">Issue location *</label>
-                          <span className="muted">
-                            Click the map to place a pin · Southeast Bengaluru Pilot
-                          </span>
+                          <label className="field-label">{t("loc.label")} *</label>
+                          <span className="muted">{t("loc.hint")}</span>
                         </div>
 
                         <div className="picker-map">
@@ -1125,7 +1162,7 @@ export function App() {
 
                         <div className="coordinates">
                           <label>
-                            Latitude
+                            {t("loc.lat")}
                             <input
                               type="number"
                               step="any"
@@ -1139,7 +1176,7 @@ export function App() {
                             />
                           </label>
                           <label>
-                            Longitude
+                            {t("loc.lng")}
                             <input
                               type="number"
                               step="any"
@@ -1155,17 +1192,44 @@ export function App() {
                         </div>
 
                         <label className="field-label" htmlFor="landmark">
-                          Nearby landmark <small>(optional)</small>
+                          {t("landmark.label")} <small>{t("landmark.optional")}</small>
                         </label>
                         <input
                           id="landmark"
                           maxLength={150}
                           value={form.landmark}
                           onChange={(e) =>
-                            setForm({ ...form, landmark: e.target.value })
+                            setForm({ ...form, landmark: e.target.value, landmarkEdited: true })
                           }
-                          placeholder="e.g. Opposite Sony World signal, Koramangala"
+                          placeholder={landmarkLookup === "looking" && !form.landmark ? t("landmark.looking") : t("landmark.ph")}
+                          aria-describedby="landmark-hint"
                         />
+                        <div id="landmark-hint" className="landmark-hint" aria-live="polite">
+                          {landmarkLookup === "looking" ? (
+                            <span>
+                              <LoaderCircle size={13} className="spin" /> {t("landmark.looking")}
+                            </span>
+                          ) : form.landmarkEdited ? (
+                            suggestedLandmark &&
+                            suggestedLandmark !== form.landmark && (
+                              <button
+                                type="button"
+                                className="text-button"
+                                onClick={() =>
+                                  setForm((f) => ({ ...f, landmark: suggestedLandmark, landmarkEdited: false }))
+                                }
+                              >
+                                <MapPin size={13} /> {t("landmark.useSuggestion", { name: suggestedLandmark })}
+                              </button>
+                            )
+                          ) : landmarkLookup === "found" ? (
+                            <span>
+                              <MapPin size={13} /> {t("landmark.auto")}
+                            </span>
+                          ) : landmarkLookup === "failed" ? (
+                            <span>{t("landmark.failed")}</span>
+                          ) : null}
+                        </div>
 
                         <label className="checkbox">
                           <input
@@ -1175,20 +1239,18 @@ export function App() {
                               setForm({ ...form, confirmed: e.target.checked })
                             }
                           />
-                          I confirm the pin marks the actual civic issue location.
+                          {t("loc.confirm")}
                         </label>
                       </>
                     ) : (
                       <>
-                        <div className="section-number">Step 3 of 3</div>
-                        <h2>Ready to make a difference?</h2>
-                        <p className="muted">
-                          Take a moment to review your complaint before submitting.
-                        </p>
+                        <div className="section-number">{t("steps.of", { n: 3 })}</div>
+                        <h2>{t("s3.title")}</h2>
+                        <p className="muted">{t("s3.sub")}</p>
 
                         <div style={{ display: "flex", gap: "8px", alignItems: "center", marginBottom: "12px" }}>
                           <span className={"badge " + form.issue_type}>
-                            {issueLabels[form.issue_type]}
+                            {issueName(form.issue_type)}
                           </span>
                           {form.seriousness === "critical_hazard" ? (
                             <span
@@ -1202,7 +1264,7 @@ export function App() {
                                 border: "1px solid #fca5a5",
                               }}
                             >
-                              Critical hazard (95 pts)
+                              {t("sev.critical_hazard")}
                             </span>
                           ) : form.seriousness === "minor" ? (
                             <span
@@ -1216,7 +1278,7 @@ export function App() {
                                 border: "1px solid #fde68a",
                               }}
                             >
-                              Minor defect (40 pts)
+                              {t("sev.minor")}
                             </span>
                           ) : (
                             <span
@@ -1230,7 +1292,7 @@ export function App() {
                                 border: "1px solid #bfdbfe",
                               }}
                             >
-                              Standard defect (65 pts)
+                              {t("sev.standard")}
                             </span>
                           )}
                           {form.analysis?.is_suspicious && (
@@ -1245,7 +1307,7 @@ export function App() {
                                 border: "1px solid #fde68a",
                               }}
                             >
-                              Flagged as suspicious (-35 pts)
+                              {t("s3.suspicious")}
                             </span>
                           )}
                         </div>
@@ -1254,7 +1316,7 @@ export function App() {
 
                         {preview && (
                           <div className="analysis-image">
-                            <img src={preview} alt="Issue submission" />
+                            <img src={preview} alt={t("s3.imgAlt")} />
                           </div>
                         )}
 
@@ -1296,7 +1358,7 @@ export function App() {
                                 }}
                               >
                                 <strong style={{ fontSize: "13px", color: "#334155" }}>
-                                  Estimated priority (before photo check)
+                                  {t("s3.estimate")}
                                 </strong>
                                 <span
                                   className={"priority-pill " + live.band}
@@ -1349,12 +1411,7 @@ export function App() {
 
                         <div className="privacy-note">
                           <Info size={18} />
-                          <span>
-                            This is an estimate based on the category you selected. After you submit,
-                            the photo is checked automatically by a road-defect model. If it does not
-                            match the selected issue, the report is flagged for human review and its
-                            priority is held until it is checked.
-                          </span>
+                          <span>{t("s3.note")}</span>
                         </div>
                       </>
                     )}
@@ -1374,12 +1431,12 @@ export function App() {
                         }
                       >
                         <ChevronLeft size={16} />
-                        {step === 1 ? "Back to overview" : "Back"}
+                        {step === 1 ? t("form.backOverview") : t("form.back")}
                       </button>
 
                       {step < 3 ? (
                         <button type="button" className="primary" onClick={nextStep}>
-                          Continue <ArrowRight size={17} />
+                          {t("form.continue")} <ArrowRight size={17} />
                         </button>
                       ) : (
                         <button
@@ -1393,7 +1450,7 @@ export function App() {
                           ) : (
                             <Plus size={17} />
                           )}{" "}
-                          {saving ? "Submitting…" : "Submit Complaint"}
+                          {saving ? t("form.submitting") : t("form.submit")}
                         </button>
                       )}
                     </div>
@@ -1403,28 +1460,22 @@ export function App() {
                     <div className="help-icon">
                       <ShieldCheck size={27} />
                     </div>
-                    <h3>Your report matters.</h3>
-                    <p>
-                      Clear details help your community understand what needs
-                      attention.
-                    </p>
+                    <h3>{t("help.title")}</h3>
+                    <p>{t("help.body")}</p>
                     <div>
                       <Check size={16} />
-                      Choose the right issue type
+                      {t("help.1")}
                     </div>
                     <div>
                       <Check size={16} />
-                      Use a clear, recent photo
+                      {t("help.2")}
                     </div>
                     <div>
                       <Check size={16} />
-                      Double-check the location pin
+                      {t("help.3")}
                     </div>
                     <hr />
-                    <small>
-                      Reports belong to your account. Sign in with the same account
-                      on another device to track them.
-                    </small>
+                    <small>{t("help.foot")}</small>
                   </aside>
                 </div>
               )}
@@ -1434,24 +1485,12 @@ export function App() {
               {/* PAGE HEADING */}
               <div className="page-heading">
                 <div className="heading-row">
-                  <h1>
-                    {page === "Overview"
-                      ? "Your city, at a glance."
-                      : page === "My Reports"
-                      ? "Your voice. Your reports."
-                      : "Every report. On the map."}
-                  </h1>
+                  <h1>{t(`page.${page}.h`)}</h1>
                   <span className="region">
-                    <MapPin size={15} /> Bengaluru southeast pilot zone
+                    <MapPin size={15} /> {t("page.region")}
                   </span>
                 </div>
-                <p>
-                  {page === "Overview"
-                    ? "A shared view of the civic issues around us. Report, track, and help move your city forward."
-                    : page === "My Reports"
-                    ? "Follow the issues you have reported from this account."
-                    : "Explore saved complaints and see what needs attention in your neighbourhood."}
-                </p>
+                <p>{t(`page.${page}.p`)}</p>
               </div>
 
               {/* STAT METRIC CARDS */}
@@ -1483,7 +1522,7 @@ export function App() {
                         <strong className="ledger-value">
                           {value === null ? "…" : <CountUp value={value} />}
                         </strong>
-                        <small>{metrics ? sub : "Active complaints"}</small>
+                        <small>{metrics ? sub : t("stat.active")}</small>
                         <span className="lane-dash" aria-hidden="true" />
                       </button>
                     );
@@ -1500,21 +1539,19 @@ export function App() {
                       <span className="section-icon">
                         <MapIcon size={19} />
                       </span>
-                      <h2>
-                        {page === "My Reports"
-                          ? "My reports"
-                          : "Neighbourhood reports"}
-                      </h2>
+                      <h2>{page === "My Reports" ? t("ws.mine") : t("ws.neighbourhood")}</h2>
                       {user && (
                         <span className="outline-badge">
-                          {total === null ? "Loading…" : `${total} ${total === 1 ? "report" : "reports"}`}
+                          {total === null
+                            ? t("ws.loading")
+                            : t(total === 1 ? "ws.count.one" : "ws.count.many", { n: total })}
                         </span>
                       )}
                     </div>
                     <p>
                       {!user || total === null
-                        ? "Your community's reports, in one place."
-                        : `Showing ${rows.length} of ${total} matching reports`}
+                        ? t("ws.blurb")
+                        : t("ws.showing", { shown: rows.length, total })}
                     </p>
                   </div>
                   <button
@@ -1523,7 +1560,7 @@ export function App() {
                     disabled={busy}
                   >
                     <RefreshCw size={15} className={busy ? "spin" : ""} />
-                    Refresh
+                    {t("ws.refresh")}
                   </button>
                 </div>
 
@@ -1532,8 +1569,8 @@ export function App() {
                   <div className="search-box">
                     <Search size={17} />
                     <input
-                      aria-label="Search complaints"
-                      placeholder="Search by reference or description…"
+                      aria-label={t("filter.searchAria")}
+                      placeholder={t("filter.searchPh")}
                       value={search}
                       onChange={(e) => setSearch(e.target.value)}
                     />
@@ -1541,7 +1578,7 @@ export function App() {
                       <button
                         className="icon-button"
                         onClick={() => setSearch("")}
-                        aria-label="Clear search"
+                        aria-label={t("filter.clearSearch")}
                       >
                         <X size={14} />
                       </button>
@@ -1549,27 +1586,27 @@ export function App() {
                   </div>
 
                   <select
-                    aria-label="Issue type filter"
+                    aria-label={t("filter.issueAria")}
                     value={issue}
                     onChange={(e) => setIssue(e.target.value)}
                   >
-                    <option value="">All issue types</option>
-                    {Object.entries(issueLabels).map(([k, v]) => (
+                    <option value="">{t("filter.allIssues")}</option>
+                    {Object.keys(issueLabels).map((k) => (
                       <option value={k} key={k}>
-                        {v}
+                        {issueName(k)}
                       </option>
                     ))}
                   </select>
 
                   <select
-                    aria-label="Status filter"
+                    aria-label={t("filter.statusAria")}
                     value={status}
                     onChange={(e) => setStatus(e.target.value)}
                   >
-                    <option value="">All statuses</option>
-                    {Object.entries(statusLabels).map(([k, v]) => (
+                    <option value="">{t("filter.allStatuses")}</option>
+                    {Object.keys(statusLabels).map((k) => (
                       <option value={k} key={k}>
-                        {v}
+                        {statusName(k)}
                       </option>
                     ))}
                   </select>
@@ -1577,7 +1614,7 @@ export function App() {
                   <input
                     className="date-filter"
                     type="date"
-                    title="Submitted from"
+                    title={t("filter.from")}
                     value={date}
                     onChange={(e) => setDate(e.target.value)}
                   />
@@ -1585,7 +1622,7 @@ export function App() {
                   <input
                     className="date-filter"
                     type="date"
-                    title="Submitted through"
+                    title={t("filter.through")}
                     value={until}
                     min={date}
                     onChange={(e) => setUntil(e.target.value)}
@@ -1593,7 +1630,7 @@ export function App() {
 
                   {filterActive && (
                     <button className="text-button" onClick={clearFilters}>
-                      Clear filters
+                      {t("filter.clear")}
                     </button>
                   )}
                 </div>
@@ -1605,14 +1642,14 @@ export function App() {
                     onClick={() => setView("map")}
                   >
                     <MapIcon size={16} />
-                    Map
+                    {t("view.map")}
                   </button>
                   <button
                     className={view === "list" ? "active" : ""}
                     onClick={() => setView("list")}
                   >
                     <FileText size={16} />
-                    List
+                    {t("view.list")}
                   </button>
                 </div>
 
@@ -1620,7 +1657,7 @@ export function App() {
                   <div className="error-box" role="alert">
                     {error}
                     <button className="text-button" onClick={reload}>
-                      Retry
+                      {t("common.retry")}
                     </button>
                   </div>
                 )}
@@ -1637,27 +1674,23 @@ export function App() {
                     <div className="map-caption">
                       <span>
                         <span className="dot live" />
-                        Southeast Bengaluru pilot, weighted for high-traffic corridors
+                        {t("map.caption")}
                       </span>
-                      <small>Location is never continuously tracked.</small>
+                      <small>{t("map.privacy")}</small>
                     </div>
                   </div>
 
-                  <div className="complaint-list">
+                  <div className="complaint-list" id="complaints">
                     <div className="list-heading">
-                      <h3>
-                        {page === "My Reports"
-                          ? "Your complaints"
-                          : "Recent complaints"}
-                      </h3>
+                      <h3>{page === "My Reports" ? t("list.mine") : t("list.recent")}</h3>
                       <select
-                        aria-label="Sort complaints"
+                        aria-label={t("list.sortAria")}
                         value={sort}
                         onChange={(e) => setSort(e.target.value)}
                       >
-                        <option value="priority">Priority (Highest first)</option>
-                        <option value="newest">Newest first</option>
-                        <option value="oldest">Oldest first</option>
+                        <option value="priority">{t("list.sortPriority")}</option>
+                        <option value="newest">{t("list.sortNewest")}</option>
+                        <option value="oldest">{t("list.sortOldest")}</option>
                       </select>
                     </div>
 
@@ -1666,9 +1699,9 @@ export function App() {
                         <span className="empty-art">
                           <ShieldCheck size={30} />
                         </span>
-                        <p>Sign in to see the reports in your neighbourhood and follow your own.</p>
+                        <p>{t("list.signInPrompt")}</p>
                         <button className="primary" onClick={() => setAuthModal(true)}>
-                          Sign in
+                          {t("session.signIn")}
                         </button>
                       </div>
                     ) : busy ? (
@@ -1693,19 +1726,21 @@ export function App() {
                           >
                             <div className="complaint-row-top">
                               <span className={"badge " + r.issue_type}>
-                                {issueLabels[r.issue_type] || r.issue_type}
+                                {issueName(r.issue_type)}
                               </span>
-                              <small>{new Date(r.created_at).toLocaleDateString()}</small>
+                              <small>{new Date(r.created_at).toLocaleDateString(locale)}</small>
                             </div>
                             <h4>{r.description}</h4>
-                            <span className="reference">{r.public_reference || `Report #${r.id.slice(0, 8)}`}</span>
+                            <span className="reference">
+                              {r.public_reference || t("common.reportNo", { id: r.id.slice(0, 8) })}
+                            </span>
 
                             {(score !== undefined || r.duplicate_count > 0 || r.is_suspicious) && (
                               <div className="row-flags">
                                 {score !== undefined && (
                                   <span
                                     className={"priority-meter " + band}
-                                    title={r.priority_reason || `Priority score ${score.toFixed(1)} out of 100`}
+                                    title={r.priority_reason || t("list.scoreTitle", { score: score.toFixed(1) })}
                                   >
                                     <span className="meter-track">
                                       <span style={{ width: `${Math.min(100, score)}%` }} />
@@ -1715,12 +1750,12 @@ export function App() {
                                 )}
                                 {r.duplicate_count > 0 && (
                                   <span className="flag duplicate">
-                                    {r.duplicate_count} {r.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                                    {t(r.duplicate_count === 1 ? "list.dup.one" : "list.dup.many", { n: r.duplicate_count })}
                                   </span>
                                 )}
                                 {r.is_suspicious && (
                                   <span className="flag suspicious">
-                                    <AlertTriangle size={12} /> Suspicious
+                                    <AlertTriangle size={12} /> {t("list.suspicious")}
                                   </span>
                                 )}
                               </div>
@@ -1734,7 +1769,9 @@ export function App() {
                                   onClick={() => triggerDeduplicateForReport(r)}
                                 >
                                   <Trash2 size={13} />
-                                  Delete {r.duplicate_count} {r.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                                  {t(r.duplicate_count === 1 ? "list.deleteDup.one" : "list.deleteDup.many", {
+                                    n: r.duplicate_count,
+                                  })}
                                 </button>
                               </div>
                             )}
@@ -1742,7 +1779,7 @@ export function App() {
                             <div className="complaint-row-bottom">
                               <span className={"status " + (r.status || "open")}>
                                 <i />
-                                {statusLabels[r.status] || r.status || "Open"}
+                                {statusName(r.status || "open")}
                               </span>
                               <ArrowUpRight size={16} />
                             </div>
@@ -1759,14 +1796,14 @@ export function App() {
                         </span>
                         <p>
                           {filterActive
-                            ? "No reports match these filters."
+                            ? t("list.noMatch")
                             : page === "My Reports"
-                            ? "You haven't reported anything yet."
-                            : "No reports yet."}
+                            ? t("list.noneMine")
+                            : t("list.none")}
                         </p>
                         {filterActive && (
                           <button className="secondary" onClick={clearFilters}>
-                            Clear filters
+                            {t("filter.clear")}
                           </button>
                         )}
                       </div>
@@ -1781,9 +1818,9 @@ export function App() {
                   <section className="card status-card">
                     <div className="panel-title">
                       <Clock size={18} />
-                      <h3>From reported to resolved</h3>
+                      <h3>{t("stages.title")}</h3>
                     </div>
-                    <p>Every report has a next step. Pick a stage to filter the list.</p>
+                    <p>{t("stages.sub")}</p>
                     {(() => {
                       const sum = stages.reduce((n, k) => n + (metrics?.[k] ?? 0), 0);
                       return (
@@ -1810,7 +1847,7 @@ export function App() {
                               >
                                 <span className={"status " + k}>
                                   <i />
-                                  {statusLabels[k]}
+                                  {statusName(k)}
                                 </span>
                                 <strong>{metrics ? <CountUp value={metrics[k] ?? 0} /> : "—"}</strong>
                               </button>
@@ -1826,18 +1863,10 @@ export function App() {
                       <Construction size={28} />
                     </span>
                     <div>
-                      <h3>
-                        {isAdmin
-                          ? "Administrator Review & Priority Triage"
-                          : "Spotted an issue on your street?"}
-                      </h3>
-                      <p>
-                        {isAdmin
-                          ? "Review evidence, adjust priorities, resolve duplicates, or moderate flagged reports."
-                          : "Help put it on the map. It only takes a few minutes."}
-                      </p>
+                      <h3>{isAdmin ? t("community.adminTitle") : t("community.title")}</h3>
+                      <p>{isAdmin ? t("community.adminBody") : t("community.body")}</p>
                       <button className="text-button" onClick={report}>
-                        {isAdmin ? "View complaints" : "Create a report"}{" "}
+                        {isAdmin ? t("community.adminCta") : t("community.cta")}{" "}
                         <ArrowRight size={16} />
                       </button>
                     </div>
@@ -1848,9 +1877,9 @@ export function App() {
               {/* FOOTER */}
               <footer>
                 <span>
-                  <span className="footer-brand">NagarSaathi</span> Built for better neighbourhoods.
+                  <span className="footer-brand">NagarSaathi</span> {t("footer.built")}
                 </span>
-                <span>Bengaluru pilot, prioritised by traffic</span>
+                <span>{t("footer.pilot")}</span>
               </footer>
             </>
           )}
@@ -1881,14 +1910,14 @@ export function App() {
               ref={closeRef}
               className="close icon-button"
               onClick={closeDetails}
-              aria-label="Close dialog"
+              aria-label={t("drawer.close")}
             >
               <X />
             </button>
 
-            <div className="drawer-kicker">Complaint</div>
+            <div className="drawer-kicker">{t("drawer.kicker")}</div>
             <h2 id="dialog-title">
-              {detail.public_reference || `Report #${detail.id.slice(0, 8)}`}
+              {detail.public_reference || t("common.reportNo", { id: detail.id.slice(0, 8) })}
             </h2>
 
             {/* Suspicious Mismatch Warning Alert */}
@@ -1896,22 +1925,19 @@ export function App() {
               <div className="drawer-alert" role="note">
                 <AlertTriangle size={20} />
                 <div>
-                  <strong>Flagged as suspicious</strong>
-                  <span>
-                    {detail.suspicious_reason ||
-                      "Visual detector predicted a category that contradicts the citizen's claimed category. Awaiting administrator audit."}
-                  </span>
+                  <strong>{t("drawer.suspicious")}</strong>
+                  <span>{detail.suspicious_reason || t("drawer.suspiciousDefault")}</span>
                 </div>
               </div>
             )}
 
             <div className="button-row">
               <span className={"badge " + detail.issue_type}>
-                {issueLabels[detail.issue_type] || detail.issue_type}
+                {issueName(detail.issue_type)}
               </span>
               <span className={"status " + (detail.status || "open")}>
                 <i />
-                {statusLabels[detail.status] || detail.status || "Open"}
+                {statusName(detail.status || "open")}
               </span>
             </div>
 
@@ -1921,7 +1947,7 @@ export function App() {
               <AuthImage
                 className="detail-photo"
                 src={reportPhotoUrl(detail.photo_url)}
-                alt="Complaint evidence"
+                alt={t("drawer.evidence")}
               />
             )}
 
@@ -1933,8 +1959,8 @@ export function App() {
             )}
 
             <dl>
-              <dt>Submitted</dt>
-              <dd>{new Date(detail.created_at).toLocaleString()}</dd>
+              <dt>{t("drawer.submitted")}</dt>
+              <dd>{new Date(detail.created_at).toLocaleString(locale)}</dd>
             </dl>
 
             {/* PRIORITY BREAKDOWN */}
@@ -1944,7 +1970,7 @@ export function App() {
               return (
                 <section className="drawer-panel">
                   <div className="drawer-panel-head">
-                    <h3>Priority score</h3>
+                    <h3>{t("drawer.priority")}</h3>
                     <span className={"score-chip " + band}>{pe.score.toFixed(1)} / 100</span>
                   </div>
                   <ul className="reason-list">
@@ -1962,12 +1988,12 @@ export function App() {
                 <section className="drawer-panel">
                   <div className="drawer-panel-head">
                     <h3>
-                      <ShieldCheck size={17} /> Review and triage
+                      <ShieldCheck size={17} /> {t("drawer.review")}
                     </h3>
                   </div>
                   <div className="field-grid">
                     <label>
-                      Status
+                      {t("drawer.status")}
                       <select
                         value={reviewForm.status}
                         onChange={(e) => setReviewForm({ ...reviewForm, status: e.target.value })}
@@ -1975,39 +2001,40 @@ export function App() {
                         {/* Accepted reports move through their issue's stages; others stay in review states. */}
                         {(acceptedStatuses.includes(detail.status) ? acceptedStatuses : reviewStatuses).map((s) => (
                           <option key={s} value={s}>
-                            {statusLabels[s]}
+                            {statusName(s)}
                           </option>
                         ))}
                       </select>
                     </label>
                     <label>
-                      Priority
+                      {t("drawer.priorityField")}
                       <select
                         value={reviewForm.priority}
                         onChange={(e) => setReviewForm({ ...reviewForm, priority: e.target.value })}
                       >
-                        <option value="low">Low</option>
-                        <option value="normal">Normal</option>
-                        <option value="high">High</option>
-                        <option value="urgent">Urgent</option>
+                        {["low", "normal", "high", "urgent"].map((p) => (
+                          <option key={p} value={p}>
+                            {t(`priority.${p}`)}
+                          </option>
+                        ))}
                       </select>
                     </label>
                   </div>
                   <label className="field-full">
-                    Review note
+                    {t("drawer.note")}
                     <input
                       type="text"
-                      placeholder="Why the status or priority changed"
+                      placeholder={t("drawer.notePh")}
                       value={reviewForm.priority_reason}
                       onChange={(e) => setReviewForm({ ...reviewForm, priority_reason: e.target.value })}
                     />
                   </label>
                   <div className="drawer-actions">
                     <button className="primary" disabled={reviewSaving} onClick={handleSaveReview}>
-                      {reviewSaving ? "Saving…" : "Save review"}
+                      {reviewSaving ? t("drawer.saving") : t("drawer.save")}
                     </button>
                     <button className="danger-ghost" onClick={() => setDeleteModal(true)}>
-                      <Trash2 size={15} /> Delete
+                      <Trash2 size={15} /> {t("drawer.delete")}
                     </button>
                   </div>
                 </section>
@@ -2015,15 +2042,18 @@ export function App() {
                 {detail.duplicate_count > 0 && (
                   <section className="drawer-panel">
                     <div className="drawer-panel-head">
-                      <h3>Duplicates</h3>
+                      <h3>{t("drawer.duplicates")}</h3>
                     </div>
                     <p>
-                      {detail.duplicate_count} other {detail.duplicate_count === 1 ? "report describes" : "reports describe"} the
-                      same incident. Keep this one and delete the rest.
+                      {t(detail.duplicate_count === 1 ? "drawer.dup.one" : "drawer.dup.many", {
+                        n: detail.duplicate_count,
+                      })}
                     </p>
                     <button type="button" className="danger-ghost" onClick={handleDeduplicateKeepOne}>
-                      <Trash2 size={15} /> Delete {detail.duplicate_count}{" "}
-                      {detail.duplicate_count === 1 ? "duplicate" : "duplicates"}
+                      <Trash2 size={15} />{" "}
+                      {t(detail.duplicate_count === 1 ? "list.deleteDup.one" : "list.deleteDup.many", {
+                        n: detail.duplicate_count,
+                      })}
                     </button>
                   </section>
                 )}
@@ -2040,7 +2070,7 @@ export function App() {
                 }}
               >
                 <MapIcon size={16} />
-                Show on map
+                {t("drawer.showMap")}
               </button>
 
               <button
@@ -2048,12 +2078,12 @@ export function App() {
                 onClick={() =>
                   navigator.clipboard
                     .writeText(String(detail.public_reference || detail.id))
-                    .then(() => notify("Reference copied"))
-                    .catch(() => notify("Clipboard unavailable"))
+                    .then(() => notify(t("toast.copied")))
+                    .catch(() => notify(t("toast.noClipboard")))
                 }
               >
                 <Copy size={16} />
-                Copy reference
+                {t("drawer.copy")}
               </button>
             </div>
           </section>
@@ -2078,16 +2108,16 @@ export function App() {
             >
               <X />
             </button>
-            <div className="drawer-kicker">Moderation</div>
-            <h2>Soft Delete Complaint</h2>
+            <div className="drawer-kicker">{t("del.kicker")}</div>
+            <h2>{t("del.title")}</h2>
             <p style={{ color: "var(--muted)", fontSize: "13px", marginBottom: "14px" }}>
-              Removes this complaint from public lists while preserving auditable records.
+              {t("del.body")}
             </p>
             <label style={{ display: "block", marginBottom: "12px" }}>
-              Deletion Reason (Required for audit log)
+              {t("del.reason")}
               <textarea
                 rows={3}
-                placeholder="Explain why this complaint is being removed..."
+                placeholder={t("del.reasonPh")}
                 value={deleteReason}
                 onChange={(e) => setDeleteReason(e.target.value)}
                 style={{ width: "100%", marginTop: "6px" }}
@@ -2095,7 +2125,7 @@ export function App() {
             </label>
             <div className="button-row" style={{ justifyContent: "flex-end", gap: "8px" }}>
               <button className="secondary" onClick={() => setDeleteModal(false)}>
-                Cancel
+                {t("del.cancel")}
               </button>
               <button
                 className="primary"
@@ -2103,7 +2133,7 @@ export function App() {
                 disabled={deleteBusy || deleteReason.trim().length < 3}
                 onClick={handleSoftDelete}
               >
-                {deleteBusy ? "Deleting..." : "Confirm Soft Delete"}
+                {deleteBusy ? t("del.deleting") : t("del.confirm")}
               </button>
             </div>
           </section>
@@ -2126,15 +2156,16 @@ export function App() {
             <button
               className="close icon-button"
               onClick={() => setAuthModal(false)}
-              aria-label="Close dialog"
+              aria-label={t("drawer.close")}
             >
               <X />
             </button>
 
-            <div className="drawer-kicker">Citizen and admin access</div>
-            <h2 id="auth-title">Sign In to NAGARSAATHI</h2>
+            <div className="drawer-kicker">{t("auth.kicker")}</div>
+            <h2 id="auth-title">{t("auth.title")}</h2>
             <p style={{ fontSize: "13px", color: "var(--muted)", marginBottom: "16px" }}>
-              Sign in with your Google account.{authOptions.demo_enabled ? " Demo accounts are available in this environment." : ""}
+              {t("auth.body")}
+              {authOptions.demo_enabled ? t("auth.demoAvailable") : ""}
             </p>
 
             <div style={{ display: "flex", borderBottom: "1px solid #e2e8f0", marginBottom: "20px" }}>
@@ -2150,7 +2181,7 @@ export function App() {
                 }}
                 onClick={() => setAuthTab("demo")}
               >
-                Demo Accounts
+                {t("auth.demoTab")}
               </button>}
               <button
                 type="button"
@@ -2164,7 +2195,7 @@ export function App() {
                 }}
                 onClick={() => setAuthTab("login")}
               >
-                Google Sign In
+                {t("auth.googleTab")}
               </button>
             </div>
 
@@ -2177,7 +2208,7 @@ export function App() {
             {authTab === "demo" && authOptions.demo_enabled ? (
               <div style={{ display: "flex", flexDirection: "column", gap: "12px" }}>
                 <p style={{ fontSize: "12px", color: "var(--muted)", margin: 0 }}>
-                  Instant one-click access with pre-configured demo permissions:
+                  {t("auth.demoIntro")}
                 </p>
 
                 <button
@@ -2193,7 +2224,7 @@ export function App() {
                   onClick={() => handleDemoLogin("admin")}
                 >
                   <ShieldCheck size={18} />
-                  <span>Sign In as Demo Admin (Review & Triage)</span>
+                  <span>{t("auth.demoAdmin")}</span>
                 </button>
 
                 <button
@@ -2207,13 +2238,13 @@ export function App() {
                   disabled={authLoading}
                   onClick={() => handleDemoLogin("citizen")}
                 >
-                  <span>Sign In as Demo Citizen (Standard User)</span>
+                  <span>{t("auth.demoCitizen")}</span>
                 </button>
               </div>
             ) : (
               <div>
                 <p style={{ fontSize: "12px", color: "var(--muted)", marginBottom: "14px" }}>
-                  Sign in with verified Google credentials (Google Identity Services API):
+                  {t("auth.googleIntro")}
                 </p>
 
                 {/* Google Identity Services official button container */}
@@ -2229,7 +2260,7 @@ export function App() {
 
                 {!authOptions.google_client_id && (
                   <div className="error-box" style={{ margin: 0 }}>
-                    Google sign-in is not configured on the server. Set GOOGLE_CLIENT_ID and restart the API.
+                    {t("auth.googleMissing")}
                   </div>
                 )}
               </div>
