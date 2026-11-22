@@ -15,6 +15,7 @@ from app.adapters.storage import build_media_storage
 from app.auth import MultiTokenVerifier, TokenVerifier
 from app.database import create_database_engine
 from app.health import check_database, check_media_backend
+from app.routes.analytics_routes import router as analytics_router
 from app.routes.audit_routes import router as audit_router
 from app.routes.auth_routes import compat_router as auth_compat_router, router as auth_router
 from app.routes.complaints_routes import compat_router as complaints_compat_router, router as complaints_router
@@ -55,6 +56,7 @@ def create_app(
     application.include_router(auth_router)
     application.include_router(auth_compat_router)
     application.include_router(audit_router)
+    application.include_router(analytics_router)
     application.include_router(complaints_router)
     application.include_router(complaints_compat_router)
     application.include_router(router)

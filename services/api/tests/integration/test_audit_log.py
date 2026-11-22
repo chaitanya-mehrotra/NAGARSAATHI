@@ -53,8 +53,11 @@ def test_admin_override_and_dedupe_are_logged_and_history_is_append_only(audit_a
     client, engine = audit_api
     citizen_id, citizen = sign_in(client, "citizen")
     admin_id, admin = sign_in(client, "admin")
-    keep = make_report(engine, citizen_id)
-    dup = make_report(engine, citizen_id)
+    # A spot of its own: the fallback duplicate search deletes every same-category report within
+    # 50 m, so it must not reach reports other tests left in the shared database.
+    lonely = (77.5001, 12.8001)
+    keep = make_report(engine, citizen_id, lonely)
+    dup = make_report(engine, citizen_id, lonely)
 
     # This insert used to violate the table's CHECK constraint and fail the whole request.
     response = client.post(f"/api/v1/reports/{keep}/deduplicate-keep-one", headers=admin)

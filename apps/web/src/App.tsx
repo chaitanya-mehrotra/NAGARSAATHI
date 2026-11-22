@@ -28,10 +28,12 @@ import {
   AlertTriangle,
   Trash2,
   ScrollText,
+  BarChart3,
 } from "lucide-react";
 import ComplaintMap, { MapRow } from "./components/ComplaintMap";
 import { IssueCounts, GroupingControls } from "./components/Grouping";
 import { Splash } from "./components/Splash";
+import { Reports } from "./components/Reports";
 import { AuditLog } from "./components/AuditLog";
 import { ReportHistory } from "./components/History";
 import {
@@ -94,6 +96,7 @@ const pagePaths: Record<string, string> = {
   "Complaint Map": "/map",
   "My Reports": "/my-reports",
   "Audit Log": "/audit",
+  Reports: "/reports",
 };
 
 const fresh = () => ({
@@ -189,7 +192,7 @@ export function App() {
   const [user, setUser] = useState<StoredUser | null>(getStoredUser);
   const isAdmin = user?.role === "admin";
   const isNigam = user?.role === "nigam" || isAdmin;
-  const navItems: [string, any][] = isAdmin ? [...nav, ["Audit Log", ScrollText]] : nav;
+  const navItems: [string, any][] = isAdmin ? [...nav, ["Reports", BarChart3], ["Audit Log", ScrollText]] : nav;
   const [authModal, setAuthModal] = useState<boolean>(false);
   const [authTab, setAuthTab] = useState<"login" | "demo">("login");
   const [gsiAttempt, setGsiAttempt] = useState(0);
@@ -873,7 +876,9 @@ export function App() {
 
         {/* MAIN BODY CONTENT */}
         <main>
-          {page === "Audit Log" ? (
+          {page === "Reports" ? (
+            isAdmin ? <Reports /> : <p role="alert">{t("audit.denied")}</p>
+          ) : page === "Audit Log" ? (
             isAdmin ? (
               <AuditLog onOpenReport={(id) => openDetails({ id })} />
             ) : (
