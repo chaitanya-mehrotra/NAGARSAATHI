@@ -76,11 +76,13 @@ def event(
     actor: UUID | None,
     reason: str,
     evidence: dict[str, Any] | None = None,
+    from_state: str | None = None,
+    to_state: str | None = None,
 ) -> None:
     connection.execute(
         text("""
-      INSERT INTO issue_events(issue_id,action,actor_id,reason,evidence)
-      VALUES (:issue,:action,:actor,:reason,CAST(:evidence AS jsonb))
+      INSERT INTO issue_events(issue_id,action,actor_id,reason,evidence,from_state,to_state)
+      VALUES (:issue,:action,:actor,:reason,CAST(:evidence AS jsonb),:from_state,:to_state)
     """),
         {
             "issue": issue_id,
@@ -88,6 +90,8 @@ def event(
             "actor": actor,
             "reason": reason,
             "evidence": json.dumps(evidence or {}),
+            "from_state": from_state,
+            "to_state": to_state,
         },
     )
 

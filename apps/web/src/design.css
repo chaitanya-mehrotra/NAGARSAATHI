@@ -1887,3 +1887,22 @@ textarea,
     transition: none !important;
   }
 }
+
+/* History timeline and admin audit log */
+.timeline { list-style: none; margin: 0; padding: 0 0 0 4px; }
+.timeline li { display: flex; gap: 12px; padding: 0 0 14px; position: relative; }
+.timeline li:not(:last-child)::before {
+  content: ""; position: absolute; left: 4px; top: 14px; bottom: 0; width: 2px; background: var(--rule);
+}
+.timeline-dot { flex: none; width: 10px; height: 10px; margin-top: 6px; border-radius: 50%; background: var(--nigam); }
+.timeline small { display: block; color: var(--muted); }
+.timeline-state { color: var(--nigam); }
+.timeline-reason { margin: 4px 0 0; color: var(--ink-soft); overflow-wrap: anywhere; }
+.audit-filters { display: flex; flex-wrap: wrap; gap: 12px; align-items: flex-end; margin-bottom: 16px; padding: 16px; }
+.audit-filters label { display: grid; gap: 4px; min-width: 150px; }
+.audit-table-wrap { overflow-x: auto; padding: 8px 16px 16px; }
+.audit-table { width: 100%; border-collapse: collapse; }
+.audit-table th, .audit-table td { padding: 10px 8px; text-align: left; border-bottom: 1px solid var(--rule-soft); vertical-align: top; }
+.audit-table td:last-child { overflow-wrap: anywhere; min-width: 200px; }
+.audit-empty { padding: 16px 8px; color: var(--muted); }
+.link-button { background: none; border: 0; padding: 0; color: var(--nigam); text-decoration: underline; cursor: pointer; font: inherit; }

@@ -1,5 +1,6 @@
 """Complaints, public citizen feeds, soft deletion, and duplicate grouping routes."""
 
+import json
 from datetime import date, datetime
 from typing import Annotated, Any
 from uuid import UUID
@@ -15,6 +16,7 @@ from app.domain.report_status import (
     REPORT_REVIEW_STATUSES,
     REPORT_WITH_ISSUE_SQL,
 )
+from app.domain.issues import event as issue_event
 from app.intake import report_detail
 from app.intake_schemas import Actor
 from app.routes.auth_routes import CurrentActor
@@ -351,21 +353,33 @@ def update_complaint_review(
     if not (actor.has_role(Role.ADMIN) or actor.has_role(Role.NIGAM) or actor.has_role(Role.REVIEWER)):
         raise HTTPException(403, "Reviewer or administrator permission required")
 
+    previous_state: str | None = None
     with request.app.state.engine.begin() as connection:
         if body.status:
             current = connection.execute(
-                text(f"SELECT r.state, irl.issue_id FROM {REPORT_WITH_ISSUE_SQL} WHERE r.id = :id AND r.deleted_at IS NULL"),
+                text(f"SELECT r.state, irl.issue_id, i.status AS issue_status FROM {REPORT_WITH_ISSUE_SQL} WHERE r.id = :id AND r.deleted_at IS NULL"),
                 {"id": report_id},
             ).mappings().first()
             if current is None:
                 raise HTTPException(404, "Report not found")
             accepted = current["state"] == "admitted" and current["issue_id"] is not None
+            previous_state = current["issue_status"] if accepted else current["state"]
             if accepted and body.status in ISSUE_REVIEW_STATUSES:
                 connection.execute(
                     text(
                         "UPDATE issues SET status=:status, row_version=row_version+1, updated_at=NOW() WHERE id=:id"
                     ),
                     {"status": body.status, "id": current["issue_id"]},
+                )
+                issue_event(
+                    connection,
+                    current["issue_id"],
+                    "status_changed",
+                    actor.id,
+                    body.priority_reason or "Review updated via console",
+                    {"report_id": str(report_id)},
+                    from_state=current["issue_status"],
+                    to_state=body.status,
                 )
             elif not accepted and body.status in REPORT_REVIEW_STATUSES:
                 connection.execute(
@@ -388,7 +402,13 @@ def update_complaint_review(
                 "id": report_id,
                 "actor": actor.id,
                 "reason": body.priority_reason or "Review updated via console",
-                "details": f'{{"status": "{body.status}", "priority": "{body.priority}"}}',
+                "details": json.dumps(
+                    {
+                        "status": body.status,
+                        "priority": body.priority,
+                        "previous_state": previous_state,
+                    }
+                ),
             },
         )
     return get_complaint_detail(report_id, request, actor)
@@ -460,7 +480,7 @@ def deduplicate_keep_one(
                     JOIN reports r2 ON r1.claimed_category = r2.claimed_category
                       AND r2.id != r1.id
                       AND r2.deleted_at IS NULL
-                      AND ST_DWithin(r1.geom, r2.geom, 50)
+                      AND ST_DWithin(r1.confirmed_point, r2.confirmed_point, 50)
                     WHERE r1.id = :report_id
                 """),
                 {"report_id": report_id},
@@ -493,7 +513,9 @@ def deduplicate_keep_one(
                     "id": dup_id,
                     "actor": actor.id,
                     "reason": reason_text,
-                    "details": f'{{"primary_report_id": "{report_id}", "issue_id": "{issue_id}"}}',
+                    "details": json.dumps(
+                        {"primary_report_id": str(report_id), "issue_id": str(issue_id) if issue_id else None}
+                    ),
                 },
             )
             deleted_count += 1

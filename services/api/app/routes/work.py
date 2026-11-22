@@ -242,6 +242,8 @@ def action(issue_id: UUID, body: WorkAction, request: Request, actor: CurrentAct
             actor.id,
             body.reason,
             {"media_ids": [str(v) for v in body.media_ids]},
+            from_state=row["status"],
+            to_state=states[body.action],
         )
         audit(connection, actor, issue_id, "work_action", body, issue_id, row["row_version"] + 1)
         if body.action not in {"verify", "archive"}:
