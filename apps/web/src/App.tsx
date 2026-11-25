@@ -29,11 +29,15 @@ import {
   Trash2,
   ScrollText,
   BarChart3,
+  PanelLeftClose,
+  PanelLeftOpen,
 } from "lucide-react";
 import ComplaintMap, { MapRow } from "./components/ComplaintMap";
 import { IssueCounts, GroupingControls } from "./components/Grouping";
 import { Splash } from "./components/Splash";
 import { Reports } from "./components/Reports";
+import { AccountMenu } from "./components/AccountMenu";
+import { cardTitle, relativeDay, shortReference } from "./components/cardText";
 import { AuditLog } from "./components/AuditLog";
 import { ReportHistory } from "./components/History";
 import {
@@ -169,6 +173,38 @@ export function App() {
   const statusName = (k: string) => (statusLabels[k] ? t(`status.${k}`) : k);
   const page =Object.keys(pagePaths).find((p) => pagePaths[p] === location.pathname) ?? "Overview";
   const [mobile, setMobile] = useState<boolean>(false);
+  // Desktop only: collapse the sidebar to an icon strip. The choice is remembered per browser.
+  const [collapsed, setCollapsed] = useState<boolean>(() => {
+    try {
+      return localStorage.getItem("nagarsaathi.sidebar") === "collapsed";
+    } catch {
+      return false;
+    }
+  });
+  const toggleNav = () => {
+    if (window.matchMedia("(max-width: 740px)").matches) {
+      setMobile((v) => !v);
+      return;
+    }
+    setCollapsed((v) => {
+      try {
+        localStorage.setItem("nagarsaathi.sidebar", v ? "open" : "collapsed");
+      } catch {
+        // Not remembered; it still applies for this visit.
+      }
+      return !v;
+    });
+  };
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "b") {
+        event.preventDefault();
+        toggleNav();
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
   const [search, setSearch] = useState<string>("");
   const [issue, setIssue] = useState<string>("");
   const [status, setStatus] = useState<string>("");
@@ -705,7 +741,7 @@ export function App() {
   ];
 
   return (
-    <div className="app">
+    <div className={"app" + (collapsed ? " sidebar-collapsed" : "")}>
       <Splash />
 
       {/* SIDEBAR */}
@@ -721,7 +757,7 @@ export function App() {
           <span className="brand-symbol">
             <MapPin size={24} />
           </span>
-          <span>
+          <span className="brand-text">
             NagarSaathi<small>{t("brand.tagline")}</small>
           </span>
         </a>
@@ -740,10 +776,11 @@ export function App() {
               key={p}
               className={"nav-item " + (page === p ? "active" : "")}
               aria-current={page === p ? "page" : undefined}
+              title={collapsed ? t(`nav.${p}`) : undefined}
               onClick={() => changePage(p)}
             >
               <Icon size={18} />
-              {t(`nav.${p}`)}
+              <span className="nav-label">{t(`nav.${p}`)}</span>
             </button>
           ))}
         </nav>
@@ -764,34 +801,6 @@ export function App() {
               <ArrowRight size={15} />
             </button>
           </div>
-
-          <div
-            className={"session" + (user ? "" : " signed-out")}
-            onClick={() => (!user ? setAuthModal(true) : null)}
-          >
-            <span className={"avatar" + (isAdmin ? " admin" : "")}>
-              {user ? user.name[0].toUpperCase() : "?"}
-            </span>
-            <div className="session-text">
-              <div className="session-name">{user ? user.name : t("session.signIn")}</div>
-              <small>
-                {user ? (isAdmin ? t("session.admin") : t("session.citizen")) : t("session.prompt")}
-              </small>
-            </div>
-            {user && (
-              <button
-                className="icon-button"
-                title={t("session.signOut")}
-                aria-label={t("session.signOut")}
-                onClick={(e) => {
-                  e.stopPropagation();
-                  handleLogout();
-                }}
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
         </div>
       </aside>
 
@@ -799,17 +808,21 @@ export function App() {
       <div className="main">
         {/* TOPBAR */}
         <header className="topbar">
-          <button
-            className="mobile-menu icon-button"
-            onClick={() => setMobile(!mobile)}
-            aria-label={t("top.toggleNav")}
-          >
-            <Menu />
-          </button>
+          <div className="top-left">
+            <button
+              className="nav-toggle icon-button"
+              onClick={toggleNav}
+              aria-label={collapsed ? t("nav.expand") : t("nav.collapse")}
+              title={(collapsed ? t("nav.expand") : t("nav.collapse")) + " (Ctrl+B)"}
+            >
+              <span className="nav-toggle-desktop">{collapsed ? <PanelLeftOpen size={20} /> : <PanelLeftClose size={20} />}</span>
+              <span className="nav-toggle-mobile"><Menu size={20} /></span>
+            </button>
 
-          <div className="breadcrumb">
-            {t("top.workspace")} <ChevronRight size={14} />
-            <strong>{t(`nav.${page}`)}</strong>
+            <div className="breadcrumb">
+              {t("top.workspace")} <ChevronRight size={14} />
+              <strong>{t(`nav.${page}`)}</strong>
+            </div>
           </div>
 
           <div className="top-search search-box">
@@ -826,13 +839,6 @@ export function App() {
           </div>
 
           <div className="top-actions">
-            {isAdmin && (
-              <span className="role-chip">
-                <ShieldCheck size={14} />
-                {t("top.admin")}
-              </span>
-            )}
-
             <div
               className={"connection " + (connection === "Live" ? "online" : "")}
             >
@@ -856,9 +862,7 @@ export function App() {
             </div>
 
             {user ? (
-              <button className="secondary" onClick={handleLogout}>
-                {t("top.signOut")}
-              </button>
+              <AccountMenu user={user} onSignOut={handleLogout} />
             ) : (
               <button className="secondary" onClick={() => setAuthModal(true)}>
                 {t("top.signIn")}
@@ -1744,24 +1748,27 @@ export function App() {
                               <span className={"badge " + r.issue_type}>
                                 {issueName(r.issue_type)}
                               </span>
-                              <small>{new Date(r.created_at).toLocaleDateString(locale)}</small>
+                              <small title={new Date(r.created_at).toLocaleString(locale)}>
+                                {relativeDay(r.created_at, locale)}
+                              </small>
                             </div>
-                            <h4>{r.description}</h4>
-                            <span className="reference">
-                              {r.public_reference || t("common.reportNo", { id: r.id.slice(0, 8) })}
+                            <h4>
+                              {cardTitle(r.description, r.issue_type, issueName(r.issue_type), r.area_name, (area, category) =>
+                                t("card.titleFallback", { area, category }),
+                              )}
+                            </h4>
+                            <span className="reference" title={r.public_reference}>
+                              {shortReference(r.public_reference) || t("common.reportNo", { id: r.id.slice(0, 8) })}
                             </span>
 
                             {(score !== undefined || r.duplicate_count > 0 || r.is_suspicious) && (
                               <div className="row-flags">
                                 {score !== undefined && (
                                   <span
-                                    className={"priority-meter " + band}
+                                    className={"priority-text " + band}
                                     title={r.priority_reason || t("list.scoreTitle", { score: score.toFixed(1) })}
                                   >
-                                    <span className="meter-track">
-                                      <span style={{ width: `${Math.min(100, score)}%` }} />
-                                    </span>
-                                    {score.toFixed(0)}
+                                    {t("card.priority", { n: score.toFixed(0) })}
                                   </span>
                                 )}
                                 {r.duplicate_count > 0 && (
@@ -1793,11 +1800,13 @@ export function App() {
                             )}
 
                             <div className="complaint-row-bottom">
-                              <span className={"status " + (r.status || "open")}>
+                              <span
+                                className={"status " + (r.status || "open")}
+                                title={r.status_hint ? t(`hint.${r.status_hint}`) : undefined}
+                              >
                                 <i />
                                 {statusName(r.status || "open")}
                               </span>
-                              <ArrowUpRight size={16} />
                             </div>
                           </button>
                         );

@@ -34,6 +34,25 @@ def _parse_day(value: str, field: str) -> date | None:
         raise HTTPException(422, f"{field} must be a date like 2026-10-29") from None
 
 
+def status_hint(state: str, reason: str | None) -> str | None:
+    """A coarse, citizen-safe code for why a report is not yet accepted (never the raw reason)."""
+    if state == "out_of_scope":
+        return "outside_pilot"
+    if state not in {"awaiting_review", "submitted", "processing", "processing_failed", "rejected"}:
+        return None
+    if state == "rejected":
+        return "photo_rejected"
+    if state == "processing_failed" or reason == "provider_error":
+        return "check_failed"
+    if reason in {"claimed_category_conflict_or_manual_category"}:
+        return "category_conflict"
+    if reason in {"photo_needs_review", "human_review_required"}:
+        return "photo_unclear"
+    if reason == "location_quality_requires_review":
+        return "location_unclear"
+    return "waiting"
+
+
 class SoftDeleteRequest(BaseModel):
     reason: str = Field(min_length=3, max_length=500)
 
@@ -246,6 +265,9 @@ def list_complaints(
                 r.received_at as created_at,
                 r.is_suspicious,
                 r.suspicious_reason,
+                r.state AS report_state,
+                r.review_reason AS raw_review_reason,
+                (SELECT a.display_name FROM areas a WHERE a.id = r.area_id) AS area_name,
                 m.id as media_id,
                 u.display_name as citizen_name,
                 COALESCE(ps.score, 
@@ -305,6 +327,7 @@ def list_complaints(
             item["id"] = str(item["id"])
             item["is_suspicious"] = bool(item.get("is_suspicious", False))
             item["suspicious_reason"] = item.get("suspicious_reason")
+            item["status_hint"] = status_hint(item.pop("report_state"), item.pop("raw_review_reason"))
             item["photo_url"] = f"/api/v1/media/{item['media_id']}/content" if item.get("media_id") else None
             score = float(item.get("priority_score") or 50.0)
             item["priority_score"] = score

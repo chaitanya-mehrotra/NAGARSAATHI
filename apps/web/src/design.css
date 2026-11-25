@@ -1945,3 +1945,60 @@ textarea,
 .hb-track { height: 14px; display: block; }
 .hb-track i { display: block; height: 100%; border-radius: 0 4px 4px 0; min-width: 2px; }
 .hb-value { font-variant-numeric: tabular-nums; min-width: 3.2em; }
+
+/* Account menu and collapsible sidebar */
+.top-left { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.nav-toggle { color: var(--ink-soft); border-radius: 8px; padding: 6px; }
+.nav-toggle:hover { background: var(--rule-soft); color: var(--ink); }
+.nav-toggle-mobile { display: none; }
+.account { position: relative; }
+.account-button {
+  position: relative; width: 38px; height: 38px; padding: 0; border-radius: 50%;
+  display: inline-grid; place-items: center; border: 2px solid transparent;
+  background: var(--asphalt); color: #fff; font-weight: 700; font-size: 14px; cursor: pointer;
+}
+.account-button.admin { background: var(--signal); color: var(--asphalt); }
+.account-button:hover { border-color: var(--rule); }
+.account-badge {
+  position: absolute; right: -3px; bottom: -3px; width: 16px; height: 16px; border-radius: 50%;
+  display: grid; place-items: center; background: var(--asphalt); color: var(--signal);
+  border: 2px solid var(--concrete);
+}
+.account-popover {
+  position: absolute; right: 0; top: calc(100% + 8px); min-width: 230px; z-index: 1200;
+  background: #fff; border: 1px solid var(--rule); border-radius: 10px; padding: 6px;
+  box-shadow: 0 10px 30px #1d282c26;
+}
+.account-who { display: grid; gap: 2px; padding: 10px 12px 12px; border-bottom: 1px solid var(--rule-soft); margin-bottom: 4px; }
+.account-who span { color: var(--muted); font-size: 0.85rem; overflow-wrap: anywhere; }
+.account-who .account-role { color: var(--nigam); font-weight: 600; }
+.account-who .account-role.admin { color: var(--pothole); }
+.account-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; padding: 9px 12px; border: 0;
+  background: none; border-radius: 8px; color: var(--ink); cursor: pointer; font: inherit; text-align: left;
+}
+.account-item:hover, .account-item:focus-visible { background: var(--rule-soft); }
+
+.sidebar, .main { transition: width 0.25s var(--ease-out), margin-left 0.25s var(--ease-out), padding 0.25s var(--ease-out); }
+@media (min-width: 741px) {
+  .sidebar-collapsed .sidebar { width: 72px; padding-left: 12px; padding-right: 12px; overflow: hidden; }
+  .sidebar-collapsed .main { margin-left: 72px; }
+  .sidebar-collapsed .brand { justify-content: center; }
+  .sidebar-collapsed .brand-text,
+  .sidebar-collapsed .workspace-label,
+  .sidebar-collapsed .nav-label,
+  .sidebar-collapsed .sidebar-bottom { display: none; }
+  .sidebar-collapsed .nav-item { justify-content: center; padding: 0; }
+}
+@media (max-width: 740px) {
+  .nav-toggle-desktop { display: none; }
+  .nav-toggle-mobile { display: inline; }
+  .top-left { flex: none; }
+}
+
+/* Complaint card: priority as words, short reference */
+.priority-text { font-size: 0.82rem; font-weight: 600; color: var(--ink-soft); }
+.priority-text.critical { color: var(--critical); }
+.priority-text.elevated { color: var(--pothole); }
+.complaint-row h4 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.complaint-row .status[title] { cursor: help; }
